@@ -76,7 +76,7 @@ void message_extractor_delete(struct message_extractor_t *self)
 // Maximum number of requests waiting for a response
 #define REQUEST_QUEUE_LEN 10
 
-struct sent_request_t
+struct stored_request_t
 {
     json_object *json_request;
     struct afb_req_common *afb_req;
@@ -90,16 +90,16 @@ struct to_mqtt_t
     // json_object *on_event_template;
     struct message_extractor_t response_extractor;
 
-    struct sent_request_t sent_requests[REQUEST_QUEUE_LEN];
+    struct stored_request_t stored_requests[REQUEST_QUEUE_LEN];
 };
 
-int to_mqtt_add_sent_request(struct to_mqtt_t *self,
+int to_mqtt_add_stored_request(struct to_mqtt_t *self,
                              struct afb_req_common *afb_req,
                              json_object *json,
                              int timeout_job_id)
 {
     int i = 0;
-    while ((i < REQUEST_QUEUE_LEN) && (self->sent_requests[i].afb_req))
+    while ((i < REQUEST_QUEUE_LEN) && (self->stored_requests[i].afb_req))
         i++;
 
     if (i == REQUEST_QUEUE_LEN) {
@@ -107,16 +107,16 @@ int to_mqtt_add_sent_request(struct to_mqtt_t *self,
         return -1;
     }
 
-    self->sent_requests[i].afb_req = afb_req;
-    self->sent_requests[i].json_request = json;
-    self->sent_requests[i].timeout_job_id = timeout_job_id;
+    self->stored_requests[i].afb_req = afb_req;
+    self->stored_requests[i].json_request = json;
+    self->stored_requests[i].timeout_job_id = timeout_job_id;
     return i;
 }
 
 int to_mqtt_get_request_index(struct to_mqtt_t *self, struct afb_req_common *req)
 {
     for (size_t i = 0; i < REQUEST_QUEUE_LEN; i++) {
-        if (self->sent_requests[i].afb_req == req) {
+        if (self->stored_requests[i].afb_req == req) {
             return i;
         }
     }
@@ -127,7 +127,7 @@ int to_mqtt_match_reponse(struct to_mqtt_t *self, json_object *response)
 {
     int i = 0;
     for (; i < REQUEST_QUEUE_LEN; i++) {
-        struct sent_request_t *sr = &self->sent_requests[i];
+        struct stored_request_t *sr = &self->stored_requests[i];
         if (!sr->afb_req)
             // item deleted
             continue;
@@ -167,9 +167,9 @@ int to_mqtt_match_reponse(struct to_mqtt_t *self, json_object *response)
     return -1;
 }
 
-void to_mqtt_delete_sent_request(struct to_mqtt_t *self, size_t index)
+void to_mqtt_delete_stored_request(struct to_mqtt_t *self, size_t index)
 {
-    self->sent_requests[index].afb_req = NULL;
+    self->stored_requests[index].afb_req = NULL;
 }
 
 void to_mqtt_delete(struct to_mqtt_t *self)
@@ -178,6 +178,13 @@ void to_mqtt_delete(struct to_mqtt_t *self)
         json_object_put(self->request_template);
     message_extractor_delete(&self->response_extractor);
 }
+
+struct from_mqtt_t
+{
+    struct message_extractor_t request_extractor;
+
+    struct stored_request_t received_requests[REQUEST_QUEUE_LEN];
+};
 
 struct mqtt_ext_handler_t
 {
@@ -323,8 +330,8 @@ void on_response_timeout(int signal, void *data)
     }
 
     printf("Found req\n");
-    json_object_put(g_handler->to_mqtt.sent_requests[index].json_request);
-    g_handler->to_mqtt.sent_requests[index].afb_req = NULL;
+    json_object_put(g_handler->to_mqtt.stored_requests[index].json_request);
+    g_handler->to_mqtt.stored_requests[index].afb_req = NULL;
 
     struct afb_data *reply;
     afb_data_create_raw(&reply, &afb_type_predefined_stringz, "Timeout waiting for response", 0,
@@ -379,7 +386,7 @@ static void on_to_mqtt_request(void *closure, struct afb_req_common *req)
                                /* timeout = */ 0, on_response_timeout, req, Afb_Sched_Mode_Normal);
         printf("job_id %d\n", job_id);
 
-        to_mqtt_add_sent_request(&handler->to_mqtt, req, filled, job_id);
+        to_mqtt_add_stored_request(&handler->to_mqtt, req, filled, job_id);
     }
     printf("*******\n");
 }
@@ -420,16 +427,24 @@ void on_mqtt_message(struct mosquitto *mosq, void *user_data, const struct mosqu
 
     struct mqtt_ext_handler_t *handler = (struct mqtt_ext_handler_t *)user_data;
 
+    // Parse the received message as JSON
     json_tokener *tokener = json_tokener_new();
     json_object *mqtt_response_json = json_tokener_parse_ex(tokener, msg->payload, msg->payloadlen);
     json_tokener_free(tokener);
 
+    if (!mqtt_response_json) {
+        // Not a valid JSON, abort
+        return;
+    }
+
+
+
     int request_idx = to_mqtt_match_reponse(&handler->to_mqtt, mqtt_response_json);
     if (request_idx != -1) {
-        struct sent_request_t *sent_request = &handler->to_mqtt.sent_requests[request_idx];
+        struct stored_request_t *stored_request = &handler->to_mqtt.stored_requests[request_idx];
 
         // disarm the response timeout
-        afb_sched_abort_job(sent_request->timeout_job_id);
+        afb_sched_abort_job(stored_request->timeout_job_id);
 
         // extract useful data from response
         json_object *response_json = mqtt_response_json;
@@ -443,13 +458,13 @@ void on_mqtt_message(struct mosquitto *mosq, void *user_data, const struct mosqu
         struct afb_data *reply;
         afb_data_create_raw(&reply, &afb_type_predefined_json_c, response_json, 0,
                             (void *)json_object_put, response_json);
-        afb_req_common_reply(sent_request->afb_req, 0, 1, &reply);
+        afb_req_common_reply(stored_request->afb_req, 0, 1, &reply);
 
         // decref the request
-        afb_req_common_unref(sent_request->afb_req);
+        afb_req_common_unref(stored_request->afb_req);
 
         // do not wait for a response to this request anymore
-        to_mqtt_delete_sent_request(&handler->to_mqtt, request_idx);
+        to_mqtt_delete_stored_request(&handler->to_mqtt, request_idx);
     }
     json_object_put(mqtt_response_json);
 }
