@@ -112,6 +112,7 @@ struct sent_request_t
 {
     json_object *json_request;
     struct afb_req_common *afb_req;
+    int timeout_job_id;
 };
 
 struct to_mqtt_t
@@ -128,7 +129,8 @@ struct to_mqtt_t
 
 int to_mqtt_add_sent_request(struct to_mqtt_t *self,
                              struct afb_req_common *afb_req,
-                             json_object *json)
+                             json_object *json,
+                             int timeout_job_id)
 {
     int i = 0;
     while ((i < REQUEST_QUEUE_LEN) && (self->sent_requests[i].afb_req))
@@ -141,6 +143,7 @@ int to_mqtt_add_sent_request(struct to_mqtt_t *self,
 
     self->sent_requests[i].afb_req = afb_req;
     self->sent_requests[i].json_request = json;
+    self->sent_requests[i].timeout_job_id = timeout_job_id;
     return i;
 }
 
@@ -159,22 +162,38 @@ int to_mqtt_match_reponse(struct to_mqtt_t *self, json_object *response)
     int i = 0;
     for (; i < REQUEST_QUEUE_LEN; i++) {
         struct sent_request_t *sr = &self->sent_requests[i];
-        if (sr->afb_req && sr->json_request) {
-            if (self->response_extractor.filter) {
-                json_object *value =
-                    json_object_get_path(response, self->response_extractor.filter->path);
-                printf("*** FILTER *** path: %s  expected: %s extracted: %s\n",
-                       self->response_extractor.filter->path,
-                       json_object_get_string(self->response_extractor.filter->expected_value),
-                       json_object_get_string(value));
-                if (value && !strcmp(json_object_get_string(value),
-                                     json_object_get_string(
-                                         self->response_extractor.filter->expected_value))) {
-                    printf("Found !\n");
+        if (!sr->afb_req)
+            // item deleted
+            continue;
 
-                    json_object_put(sr->json_request);
-                    return i;
-                }
+        //
+        // FIXME id matching
+        json_object *request_id = json_object_get_path(sr->json_request, ".id");
+        if (!request_id)
+            continue;
+        const char *request_id_str = json_object_get_string(request_id);
+        json_object *response_id = json_object_get_path(response, ".id");
+        if (!response_id)
+            continue;
+        const char *response_id_str = json_object_get_string(response_id);
+        if (strcmp(response_id_str, request_id_str))
+            continue;
+
+        // Filter matching
+        if (self->response_extractor.filter) {
+            json_object *value =
+                json_object_get_path(response, self->response_extractor.filter->path);
+            printf("*** FILTER *** path: %s  expected: %s extracted: %s\n",
+                   self->response_extractor.filter->path,
+                   json_object_get_string(self->response_extractor.filter->expected_value),
+                   json_object_get_string(value));
+            if (value &&
+                !strcmp(json_object_get_string(value),
+                        json_object_get_string(self->response_extractor.filter->expected_value))) {
+                printf("Found !\n");
+
+                json_object_put(sr->json_request);
+                return i;
             }
         }
     }
@@ -240,12 +259,6 @@ char *fill_template(const char *input_str, json_object *mapping);
 
 int AfbExtensionConfigV1(void **data, struct json_object *config, const char *uid)
 {
-    /*json_object *mapping = json_object_new_object();
-    json_object_object_add(mapping, "REPLACE", json_object_new_string("WITH"));
-    const char template[] = "test ${REPLACE} ok $ {REPLACE#";
-    printf("fill_template: '%s' -> '%s'", template, fill_template(template, mapping));
-    printf("\n");
-    return 0;*/
     LIBAFB_NOTICE("Extension %s got config %s", AfbExtensionManifest.name,
                   json_object_get_string(config));
 
@@ -317,7 +330,6 @@ int AfbExtensionConfigV1(void **data, struct json_object *config, const char *ui
                 }
             }
         }
-        // TODO: parse from_mqtt / to_mqtt
         // TODO: wrap macro LIBAFB_ERROR
     }
 
@@ -370,11 +382,14 @@ json_object *fill_template_in_json_object(json_object *jso, json_object *mapping
 
 void on_response_timeout(int signal, void *data)
 {
+    if (signal)
+        return;
+
     printf("Response timeout signal %d\n", signal);
     struct afb_req_common *req = (struct afb_req_common *)data;
     int index = to_mqtt_get_request_index(&g_handler->to_mqtt, req);
 
-    if (!index) {
+    if (index == -1) {
         // No request found, it has probably already been responsed to.
         // Do nothing then
         return;
@@ -411,7 +426,7 @@ static void on_to_mqtt_request(void *closure, struct afb_req_common *req)
 
     if (handler->to_mqtt.publish_topic) {
         uuid_t uuid;
-        uuid_generate_time((unsigned char *)&uuid);
+        uuid_generate((unsigned char *)&uuid);
         char uuid_str[37];
         snprintf(uuid_str, 37,
                  "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x", uuid[0],
@@ -438,7 +453,7 @@ static void on_to_mqtt_request(void *closure, struct afb_req_common *req)
                                /* timeout = */ 0, on_response_timeout, req, Afb_Sched_Mode_Normal);
         printf("job_id %d\n", job_id);
 
-        to_mqtt_add_sent_request(&handler->to_mqtt, req, filled);
+        to_mqtt_add_sent_request(&handler->to_mqtt, req, filled, job_id);
     }
     printf("*******\n");
 }
@@ -485,6 +500,11 @@ void on_mqtt_message(struct mosquitto *mosq, void *user_data, const struct mosqu
 
     int request_idx = to_mqtt_match_reponse(&handler->to_mqtt, mqtt_response_json);
     if (request_idx != -1) {
+        struct sent_request_t *sent_request = &handler->to_mqtt.sent_requests[request_idx];
+
+        // disarm the response timeout
+        afb_sched_abort_job(sent_request->timeout_job_id);
+
         // extract useful data from response
         json_object *response_json = mqtt_response_json;
         if (handler->to_mqtt.response_extractor.data_path) {
@@ -492,13 +512,17 @@ void on_mqtt_message(struct mosquitto *mosq, void *user_data, const struct mosqu
                                                  handler->to_mqtt.response_extractor.data_path);
             response_json = response_json ? json_object_get(response_json) : json_object_new_null();
         }
-        struct afb_req_common *req = handler->to_mqtt.sent_requests[request_idx].afb_req;
+
+        // craft a reply and reply
         struct afb_data *reply;
         afb_data_create_raw(&reply, &afb_type_predefined_json_c, response_json, 0,
                             (void *)json_object_put, response_json);
-        afb_req_common_reply(req, 0, 1, &reply);
-        afb_req_common_unref(req);
+        afb_req_common_reply(sent_request->afb_req, 0, 1, &reply);
 
+        // decref the request
+        afb_req_common_unref(sent_request->afb_req);
+
+        // do not wait for a response to this request anymore
         to_mqtt_delete_sent_request(&handler->to_mqtt, request_idx);
     }
     json_object_put(mqtt_response_json);
