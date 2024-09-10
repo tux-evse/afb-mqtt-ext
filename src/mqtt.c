@@ -9,10 +9,8 @@
 #include <signal.h>
 #include <time.h>
 
-#include <json-c/json.h>
-
 #include <libafb/afb-extension.h>
-#include <libafb/afb-misc.h>  // LIBAFB_NOTICE
+#include <libafb/afb-misc.h>
 #include <libafb/core/afb-data.h>
 #include <libafb/core/afb-req-common.h>
 
@@ -20,6 +18,8 @@
 
 #include <mosquitto.h>
 #include <uuid/uuid.h>
+
+#include "json-utils.h"
 
 /*************************************************************/
 /*************************************************************/
@@ -52,38 +52,6 @@ void json_path_filter_delete(struct json_path_filter_t *self)
         free(self->path);
     if (self->expected_value)
         json_object_put(self->expected_value);
-}
-
-json_object *json_object_get_path(json_object *obj, const char *path)
-{
-    size_t offset = 0;
-
-    while (true) {
-        if (!path[offset] || path[offset] != '.') {
-            LIBAFB_NOTICE("Wrong path format %s", path);
-            return NULL;
-        }
-        size_t end = offset + 1;
-        while (path[end] && path[end] != '.')
-            end++;
-
-        char path_part[end - offset + 1];
-        strncpy(path_part, path + offset + 1, end - offset);
-        path_part[end - offset] = 0;
-
-        json_object *json_child = NULL;
-        if (json_object_object_get_ex(obj, path_part, &json_child)) {
-            if (path[end]) {
-                obj = json_child;
-                offset = end;
-                continue;
-            }
-            else {
-                return json_child;
-            }
-        }
-        return NULL;
-    }
 }
 
 struct message_extractor_t
@@ -255,8 +223,6 @@ void mqtt_ext_handler_delete(struct mqtt_ext_handler_t *handler)
     free(handler);
 }
 
-char *fill_template(const char *input_str, json_object *mapping);
-
 int AfbExtensionConfigV1(void **data, struct json_object *config, const char *uid)
 {
     LIBAFB_NOTICE("Extension %s got config %s", AfbExtensionManifest.name,
@@ -339,47 +305,6 @@ int AfbExtensionConfigV1(void **data, struct json_object *config, const char *ui
     return 0;
 }
 
-json_object *fill_template_in_json_object(json_object *jso, json_object *mapping)
-{
-    switch (json_object_get_type(jso)) {
-    case json_type_array: {
-        json_object *output = json_object_new_array();
-        size_t len = json_object_array_length(jso);
-        for (size_t i = 0; i < len; i++) {
-            json_object_array_put_idx(
-                output, i,
-                fill_template_in_json_object(json_object_array_get_idx(jso, i), mapping));
-        }
-        return output;
-    }
-    case json_type_object: {
-        json_object *output = json_object_new_object();
-        json_object_object_foreach(jso, key, value)
-        {
-            json_object_object_add(output, key, fill_template_in_json_object(value, mapping));
-        }
-        return output;
-    }
-    case json_type_string: {
-        const char *str = json_object_get_string(jso);
-        size_t len = strlen(str);
-        if ((len >= 3) && (str[0] == '$') && (str[1] == '{') && (str[len - 1] == '}')) {
-            char tag[len - 3 + 1];
-            strncpy(tag, str + 2, len - 3);
-            tag[len - 3] = 0;
-            json_object *replace = NULL;
-            if (json_object_object_get_ex(mapping, tag, &replace)) {
-                // increment the ref of replace
-                return json_object_get(replace);
-            }
-        }
-    }
-    default:
-        // just copy by incrementing the ref
-        return json_object_get(jso);
-    }
-}
-
 void on_response_timeout(int signal, void *data)
 {
     if (signal)
@@ -438,7 +363,7 @@ static void on_to_mqtt_request(void *closure, struct afb_req_common *req)
         json_object_object_add(mapping, "data", arg);
 
         json_object *filled =
-            fill_template_in_json_object(handler->to_mqtt.request_template, mapping);
+            json_object_fill_template(handler->to_mqtt.request_template, mapping);
         const char *request_str = json_object_get_string(filled);
 
         mosquitto_publish(handler->mosq, /* mid = */ NULL, handler->to_mqtt.publish_topic,

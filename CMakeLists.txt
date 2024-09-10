@@ -40,7 +40,7 @@ pkg_check_modules(deps REQUIRED
     libmosquitto
 )
 
-set(SRC ./src/mqtt.c)
+set(SRC ./src/mqtt.c ./src/json-utils.c)
 
 
 add_library(afb-mqtt-ext SHARED ${SRC})
