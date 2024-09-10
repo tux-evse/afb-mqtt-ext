@@ -85,8 +85,6 @@ struct sent_request_t
 
 struct to_mqtt_t
 {
-    char *subscribe_topic;
-    char *publish_topic;
     int timeout_ms;
     json_object *request_template;
     // json_object *on_event_template;
@@ -176,10 +174,6 @@ void to_mqtt_delete_sent_request(struct to_mqtt_t *self, size_t index)
 
 void to_mqtt_delete(struct to_mqtt_t *self)
 {
-    if (self->subscribe_topic)
-        free(self->subscribe_topic);
-    if (self->publish_topic)
-        free(self->publish_topic);
     if (self->request_template)
         json_object_put(self->request_template);
     message_extractor_delete(&self->response_extractor);
@@ -190,6 +184,8 @@ struct mqtt_ext_handler_t
     struct mosquitto *mosq;
     char *broker_host;
     int broker_port;
+    char *subscribe_topic;
+    char *publish_topic;
     struct to_mqtt_t to_mqtt;
 };
 
@@ -211,16 +207,21 @@ struct mqtt_ext_handler_t *mqtt_ext_handler_new()
     return handler;
 }
 
-void mqtt_ext_handler_delete(struct mqtt_ext_handler_t *handler)
+void mqtt_ext_handler_delete(struct mqtt_ext_handler_t *self)
 {
-    free(handler->broker_host);
+    free(self->broker_host);
 
-    if (handler->mosq)
-        mosquitto_destroy(handler->mosq);
+    if (self->mosq)
+        mosquitto_destroy(self->mosq);
 
-    to_mqtt_delete(&handler->to_mqtt);
+    if (self->subscribe_topic)
+        free(self->subscribe_topic);
+    if (self->publish_topic)
+        free(self->publish_topic);
 
-    free(handler);
+    to_mqtt_delete(&self->to_mqtt);
+
+    free(self);
 }
 
 int AfbExtensionConfigV1(void **data, struct json_object *config, const char *uid)
@@ -263,14 +264,15 @@ int AfbExtensionConfigV1(void **data, struct json_object *config, const char *ui
             }
         }
 
+        if (json_object_object_get_ex(config_file_json, "subscribe-topic", &json_item)) {
+            g_handler->subscribe_topic = strdup(json_object_get_string(json_item));
+        }
+        if (json_object_object_get_ex(config_file_json, "publish-topic", &json_item)) {
+            g_handler->publish_topic = strdup(json_object_get_string(json_item));
+        }
+
         if (json_object_object_get_ex(config_file_json, "to-mqtt", &json_item)) {
             json_object *to_mqtt_json = json_item;
-            if (json_object_object_get_ex(to_mqtt_json, "subscribe-topic", &json_item)) {
-                g_handler->to_mqtt.subscribe_topic = strdup(json_object_get_string(json_item));
-            }
-            if (json_object_object_get_ex(to_mqtt_json, "publish-topic", &json_item)) {
-                g_handler->to_mqtt.publish_topic = strdup(json_object_get_string(json_item));
-            }
             if (json_object_object_get_ex(to_mqtt_json, "timeout-ms", &json_item)) {
                 g_handler->to_mqtt.timeout_ms = json_object_get_int(json_item);
             }
@@ -349,7 +351,7 @@ static void on_to_mqtt_request(void *closure, struct afb_req_common *req)
     }
     json_object *arg = afb_data_ro_pointer(arg_json);
 
-    if (handler->to_mqtt.publish_topic) {
+    if (handler->publish_topic) {
         uuid_t uuid;
         uuid_generate((unsigned char *)&uuid);
         char uuid_str[37];
@@ -362,11 +364,10 @@ static void on_to_mqtt_request(void *closure, struct afb_req_common *req)
         json_object_object_add(mapping, "verb", json_object_new_string(req->verbname));
         json_object_object_add(mapping, "data", arg);
 
-        json_object *filled =
-            json_object_fill_template(handler->to_mqtt.request_template, mapping);
+        json_object *filled = json_object_fill_template(handler->to_mqtt.request_template, mapping);
         const char *request_str = json_object_get_string(filled);
 
-        mosquitto_publish(handler->mosq, /* mid = */ NULL, handler->to_mqtt.publish_topic,
+        mosquitto_publish(handler->mosq, /* mid = */ NULL, handler->publish_topic,
                           strlen(request_str), request_str,
                           /* qos = */ 0, /* retain = */ false);
 
@@ -478,10 +479,10 @@ int AfbExtensionServeV1(void *data, struct afb_apiset *call_set)
         return -1;
     }
 
-    if (handler->to_mqtt.subscribe_topic) {
-        rc = mosquitto_subscribe(mosq, NULL, handler->to_mqtt.subscribe_topic, /* qos = */ 0);
+    if (handler->subscribe_topic) {
+        rc = mosquitto_subscribe(mosq, NULL, handler->subscribe_topic, /* qos = */ 0);
         if (rc != MOSQ_ERR_SUCCESS) {
-            LIBAFB_ERROR("Cannot connect to %s: %s", handler->to_mqtt.subscribe_topic,
+            LIBAFB_ERROR("Cannot connect to %s: %s", handler->subscribe_topic,
                          mosquitto_strerror(rc));
             return -1;
         }
