@@ -1,0 +1,511 @@
+/*
+ * Copyright (C) 2015-2024 IoT.bzh Company
+ * Author: Hugo Mercier <hugo.mercier@iot.bzh>
+ *
+ */
+
+#define _GNU_SOURCE
+
+#include <json-c/json.h>
+
+#include <libafb/afb-extension.h>
+#include <libafb/afb-misc.h>  // LIBAFB_NOTICE
+#include <libafb/core/afb-data.h>
+#include <libafb/core/afb-req-common.h>
+
+#include <rp-utils/rp-yaml.h>
+
+#include <mosquitto.h>
+#include <uuid/uuid.h>
+
+/*************************************************************/
+/*************************************************************/
+/** AFB-EXTENSION interface                                 **/
+/*************************************************************/
+/*************************************************************/
+
+AFB_EXTENSION("MQTT")
+
+const struct argp_option AfbExtensionOptionsV1[] = {{.name = "mqtt-config-file",
+                                                     .key = 's',
+                                                     .arg = "PATH",
+                                                     .doc = "Path to a YAML configuration file"},
+                                                    {.name = 0, .key = 0, .doc = 0}};
+
+struct json_path_filter_t
+{
+    char *path;
+    json_object *expected_value;
+};
+
+struct json_path_filter_t *json_path_filter_new()
+{
+    return calloc(1, sizeof(struct json_path_filter_t));
+}
+
+void json_path_filter_delete(struct json_path_filter_t *self)
+{
+    if (self->path)
+        free(self->path);
+    if (self->expected_value)
+        json_object_put(self->expected_value);
+}
+
+json_object *json_object_get_path(json_object *obj, const char *path)
+{
+    size_t offset = 0;
+
+    while (true) {
+        if (!path[offset] || path[offset] != '.') {
+            LIBAFB_NOTICE("Wrong path format %s", path);
+            return NULL;
+        }
+        size_t end = offset + 1;
+        while (path[end] && path[end] != '.')
+            end++;
+
+        char path_part[end - offset + 1];
+        strncpy(path_part, path + offset + 1, end - offset);
+        path_part[end - offset] = 0;
+
+        json_object *json_child = NULL;
+        if (json_object_object_get_ex(obj, path_part, &json_child)) {
+            if (path[end]) {
+                obj = json_child;
+                offset = end;
+                continue;
+            }
+            else {
+                return json_child;
+            }
+        }
+        return NULL;
+    }
+}
+
+struct message_extractor_t
+{
+    char *id_path;
+    char *data_path;
+    struct json_path_filter_t *filter;
+};
+
+void message_extractor_delete(struct message_extractor_t *self)
+{
+    if (self->id_path)
+        free(self->id_path);
+    if (self->data_path)
+        free(self->data_path);
+    if (self->filter) {
+        json_path_filter_delete(self->filter);
+        free(self->filter);
+    }
+}
+
+// Maximum number of requests waiting for a response
+#define REQUEST_QUEUE_LEN 10
+
+struct sent_request_t
+{
+    json_object *json_request;
+    struct afb_req_common *afb_req;
+};
+
+struct to_mqtt_t
+{
+    char *subscribe_topic;
+    char *publish_topic;
+    int timeout_ms;
+    json_object *request_template;
+    // json_object *on_event_template;
+    struct message_extractor_t response_extractor;
+
+    struct sent_request_t sent_requests[REQUEST_QUEUE_LEN];
+};
+
+int to_mqtt_add_sent_request(struct to_mqtt_t *self,
+                             struct afb_req_common *afb_req,
+                             json_object *json)
+{
+    int i = 0;
+    while ((i < REQUEST_QUEUE_LEN) && (self->sent_requests[i].afb_req))
+        i++;
+
+    if (i == REQUEST_QUEUE_LEN) {
+        LIBAFB_ALERT("Send queue full");
+        return -1;
+    }
+
+    self->sent_requests[i].afb_req = afb_req;
+    self->sent_requests[i].json_request = json;
+    return i;
+}
+
+int to_mqtt_match_reponse(struct to_mqtt_t *self, json_object *response)
+{
+    int i = 0;
+    for (; i < REQUEST_QUEUE_LEN; i++) {
+        struct sent_request_t *sr = &self->sent_requests[i];
+        if (sr->afb_req && sr->json_request) {
+            if (self->response_extractor.filter) {
+                json_object *value =
+                    json_object_get_path(response, self->response_extractor.filter->path);
+                printf("*** FILTER *** path: %s  expected: %s extracted: %s\n",
+                       self->response_extractor.filter->path,
+                       json_object_get_string(self->response_extractor.filter->expected_value),
+                       json_object_get_string(value));
+                if (value && !strcmp(json_object_get_string(value),
+                                     json_object_get_string(
+                                         self->response_extractor.filter->expected_value))) {
+                    printf("Found !\n");
+
+                    json_object_put(sr->json_request);
+                    return i;
+                }
+            }
+        }
+    }
+
+    return -1;
+}
+
+void to_mqtt_delete_sent_request(struct to_mqtt_t *self, size_t index)
+{
+    self->sent_requests[index].afb_req = NULL;
+}
+
+void to_mqtt_delete(struct to_mqtt_t *self)
+{
+    if (self->subscribe_topic)
+        free(self->subscribe_topic);
+    if (self->publish_topic)
+        free(self->publish_topic);
+    if (self->request_template)
+        json_object_put(self->request_template);
+    message_extractor_delete(&self->response_extractor);
+}
+
+struct mqtt_ext_handler_t
+{
+    struct mosquitto *mosq;
+    char *broker_host;
+    int broker_port;
+    struct to_mqtt_t to_mqtt;
+};
+
+const char default_mqtt_broker_host[] = "localhost";
+const int default_mqtt_broker_port = 1883;
+
+struct mqtt_ext_handler_t *mqtt_ext_handler_new()
+{
+    struct mqtt_ext_handler_t *handler = calloc(1, sizeof(struct mqtt_ext_handler_t));
+
+    handler->broker_host = strdup(default_mqtt_broker_host);
+    handler->broker_port = default_mqtt_broker_port;
+
+    to_mqtt_delete(&handler->to_mqtt);
+
+    return handler;
+}
+
+void mqtt_ext_handler_delete(struct mqtt_ext_handler_t *handler)
+{
+    free(handler->broker_host);
+
+    if (handler->mosq)
+        mosquitto_destroy(handler->mosq);
+
+    to_mqtt_delete(&handler->to_mqtt);
+
+    free(handler);
+}
+
+char *fill_template(const char *input_str, json_object *mapping);
+
+int AfbExtensionConfigV1(void **data, struct json_object *config, const char *uid)
+{
+    /*json_object *mapping = json_object_new_object();
+    json_object_object_add(mapping, "REPLACE", json_object_new_string("WITH"));
+    const char template[] = "test ${REPLACE} ok $ {REPLACE#";
+    printf("fill_template: '%s' -> '%s'", template, fill_template(template, mapping));
+    printf("\n");
+    return 0;*/
+    LIBAFB_NOTICE("Extension %s got config %s", AfbExtensionManifest.name,
+                  json_object_get_string(config));
+
+    struct mqtt_ext_handler_t *handler = mqtt_ext_handler_new();
+
+    json_object *config_file = NULL;
+    int found = json_object_object_get_ex(config, "mqtt-config-file", &config_file);
+    if (found) {
+        const char *config_file_path = json_object_get_string(config_file);
+        FILE *fp = fopen(config_file_path, "r");
+        if (!fp) {
+            LIBAFB_ERROR("[%s] Cannot open configuration file", AfbExtensionManifest.name);
+            return -1;
+        }
+
+        json_object *config_file_json = NULL;
+        int rc = rp_yaml_file_to_json_c(&config_file_json, fp, config_file_path);
+        if (rc < 0) {
+            fclose(fp);
+            LIBAFB_ERROR("[%s] Error parsing YAML configuration file", AfbExtensionManifest.name);
+            return -1;
+        }
+
+        json_object *json_item = NULL;
+        if (json_object_object_get_ex(config_file_json, "broker-host", &json_item)) {
+            handler->broker_host = strdup(json_object_get_string(json_item));
+        }
+        if (json_object_object_get_ex(config_file_json, "broker-port", &json_item)) {
+            handler->broker_port = json_object_get_int(json_item);
+        }
+
+        if (json_object_object_get_ex(config_file_json, "mapping-type", &json_item)) {
+            if (strcmp(json_object_get_string(json_item), "topic-pair")) {
+                LIBAFB_ERROR("[%s] Unsupported mapping type", AfbExtensionManifest.name);
+                return -1;
+            }
+        }
+
+        if (json_object_object_get_ex(config_file_json, "to-mqtt", &json_item)) {
+            json_object *to_mqtt_json = json_item;
+            if (json_object_object_get_ex(to_mqtt_json, "subscribe-topic", &json_item)) {
+                handler->to_mqtt.subscribe_topic = strdup(json_object_get_string(json_item));
+            }
+            if (json_object_object_get_ex(to_mqtt_json, "publish-topic", &json_item)) {
+                handler->to_mqtt.publish_topic = strdup(json_object_get_string(json_item));
+            }
+            if (json_object_object_get_ex(to_mqtt_json, "timeout-ms", &json_item)) {
+                handler->to_mqtt.timeout_ms = json_object_get_int(json_item);
+            }
+            if (json_object_object_get_ex(to_mqtt_json, "request-template", &json_item)) {
+                handler->to_mqtt.request_template = json_object_get(json_item);
+            }
+            if (json_object_object_get_ex(to_mqtt_json, "response-filter", &json_item)) {
+                json_object *response_filter = json_item;
+                if (json_object_object_get_ex(response_filter, "data-path", &json_item)) {
+                    handler->to_mqtt.response_extractor.data_path =
+                        strdup(json_object_get_string(json_item));
+                }
+                if (json_object_object_get_ex(response_filter, "filter", &json_item)) {
+                    json_object *filter = json_item;
+                    struct json_path_filter_t *path_filter = json_path_filter_new();
+                    if (json_object_object_get_ex(filter, "path", &json_item)) {
+                        path_filter->path = strdup(json_object_get_string(json_item));
+                    }
+                    if (json_object_object_get_ex(filter, "value", &json_item)) {
+                        path_filter->expected_value = json_object_get(json_item);
+                    }
+                    handler->to_mqtt.response_extractor.filter = path_filter;
+                }
+            }
+        }
+        // TODO: parse from_mqtt / to_mqtt
+        // TODO: wrap macro LIBAFB_ERROR
+    }
+
+    if (data) {
+        *data = handler;
+    }
+    return 0;
+}
+
+json_object *fill_template_in_json_object(json_object *jso, json_object *mapping)
+{
+    switch (json_object_get_type(jso)) {
+    case json_type_array: {
+        json_object *output = json_object_new_array();
+        size_t len = json_object_array_length(jso);
+        for (size_t i = 0; i < len; i++) {
+            json_object_array_put_idx(
+                output, i,
+                fill_template_in_json_object(json_object_array_get_idx(jso, i), mapping));
+        }
+        return output;
+    }
+    case json_type_object: {
+        json_object *output = json_object_new_object();
+        json_object_object_foreach(jso, key, value)
+        {
+            json_object_object_add(output, key, fill_template_in_json_object(value, mapping));
+        }
+        return output;
+    }
+    case json_type_string: {
+        const char *str = json_object_get_string(jso);
+        size_t len = strlen(str);
+        if ((len >= 3) && (str[0] == '$') && (str[1] == '{') && (str[len - 1] == '}')) {
+            char tag[len - 3 + 1];
+            strncpy(tag, str + 2, len - 3);
+            tag[len - 3] = 0;
+            json_object *replace = NULL;
+            if (json_object_object_get_ex(mapping, tag, &replace)) {
+                // increment the ref of replace
+                return json_object_get(replace);
+            }
+        }
+    }
+    default:
+        // just copy by incrementing the ref
+        return json_object_get(jso);
+    }
+}
+
+static void on_to_mqtt_request(void *closure, struct afb_req_common *req)
+{
+    struct mqtt_ext_handler_t *handler = (struct mqtt_ext_handler_t *)closure;
+
+    printf("to_mqtt_process api:%s verb:%s\n", req->apiname, req->verbname);
+
+    if (!handler->to_mqtt.request_template) {
+        // error
+    }
+
+    struct afb_data *arg_json = NULL;
+    int rc = afb_req_common_param_convert(req, 0, &afb_type_predefined_json_c, &arg_json);
+    if (rc < 0) {
+        LIBAFB_NOTICE("Cannot convert argument to JSON");
+        return;
+    }
+    json_object *arg = afb_data_ro_pointer(arg_json);
+
+    if (handler->to_mqtt.publish_topic) {
+        uuid_t uuid;
+        uuid_generate_time((unsigned char *)&uuid);
+        char uuid_str[37];
+        snprintf(uuid_str, 37,
+                 "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x", uuid[0],
+                 uuid[1], uuid[2], uuid[3], uuid[4], uuid[5], uuid[6], uuid[7], uuid[8], uuid[9],
+                 uuid[10], uuid[11], uuid[12], uuid[13], uuid[14], uuid[15]);
+        json_object *mapping = json_object_new_object();
+        json_object_object_add(mapping, "id", json_object_new_string(uuid_str));
+        json_object_object_add(mapping, "verb", json_object_new_string(req->verbname));
+        json_object_object_add(mapping, "data", arg);
+
+        json_object *filled =
+            fill_template_in_json_object(handler->to_mqtt.request_template, mapping);
+        const char *request_str = json_object_get_string(filled);
+
+        mosquitto_publish(handler->mosq, /* mid = */ NULL, handler->to_mqtt.publish_topic, strlen(request_str),
+                          request_str,
+                          /* qos = */ 0, /* retain = */ false);
+
+        to_mqtt_add_sent_request(&handler->to_mqtt, afb_req_common_addref(req), filled);
+    }
+    printf("*******\n");
+}
+
+static struct afb_api_itf to_mqtt_api_itf = {.process = on_to_mqtt_request};
+
+int AfbExtensionDeclareV1(void *data, struct afb_apiset *declare_set, struct afb_apiset *call_set)
+{
+    LIBAFB_NOTICE("Extension %s successfully registered", AfbExtensionManifest.name);
+
+    struct afb_api_item to_mqtt_api_item;
+    to_mqtt_api_item.itf = &to_mqtt_api_itf;
+    to_mqtt_api_item.group = (const void *)1;
+    to_mqtt_api_item.closure = data;
+
+    struct afb_apiset *ds = declare_set;
+    ds = afb_apiset_subset_find(ds, "public");
+
+    int rc;
+    if ((rc = afb_apiset_add(ds, "to_mqtt", to_mqtt_api_item)) < 0) {
+        LIBAFB_ERROR("Error calling afb_apiset_add (to_mqtt): %d\n", rc);
+    }
+    // afb_apiset_addref(declare_set);
+    // afb_apiset_addref(call_set);
+    return 0;
+}
+
+int AfbExtensionHTTPV1(void *data, struct afb_hsrv *hsrv)
+{
+    LIBAFB_NOTICE("Extension %s got HTTP", AfbExtensionManifest.name);
+    return 0;
+}
+
+void on_mqtt_message(struct mosquitto *mosq, void *user_data, const struct mosquitto_message *msg)
+{
+    printf("** MESSAGE RECEIVED topic: %s ", msg->topic);
+    printf("payload: <%.*s>\n", msg->payloadlen, (char *)msg->payload);
+
+    struct mqtt_ext_handler_t *handler = (struct mqtt_ext_handler_t *)user_data;
+
+    json_tokener *tokener = json_tokener_new();
+    json_object *mqtt_response_json = json_tokener_parse_ex(tokener, msg->payload, msg->payloadlen);
+    json_tokener_free(tokener);
+
+    int request_idx = to_mqtt_match_reponse(&handler->to_mqtt, mqtt_response_json);
+    if (request_idx != -1) {
+        // extract useful data from response
+        json_object *response_json = mqtt_response_json;
+        if (handler->to_mqtt.response_extractor.data_path) {
+            response_json = json_object_get_path(mqtt_response_json,
+                                                 handler->to_mqtt.response_extractor.data_path);
+            response_json = response_json ? json_object_get(response_json) : json_object_new_null();
+        }
+        struct afb_req_common *req = handler->to_mqtt.sent_requests[request_idx].afb_req;
+        struct afb_data *reply;
+        afb_data_create_raw(&reply, &afb_type_predefined_json_c, response_json, 0,
+                            (void *)json_object_put, response_json);
+        afb_req_common_reply(req, 0, 1, &reply);
+        afb_req_common_unref(req);
+
+        to_mqtt_delete_sent_request(&handler->to_mqtt, request_idx);
+    }
+    json_object_put(mqtt_response_json);
+}
+
+int AfbExtensionServeV1(void *data, struct afb_apiset *call_set)
+{
+    if (mosquitto_lib_init() != MOSQ_ERR_SUCCESS) {
+        LIBAFB_ERROR("Error calling mosquitto_lib_init");
+        return -1;
+    }
+
+    struct mqtt_ext_handler_t *handler = (struct mqtt_ext_handler_t *)data;
+
+    struct mosquitto *mosq =
+        mosquitto_new("afb_mqtt_client", /* clean_session = */ true, /* void *obj = */ handler);
+    if (mosq == NULL) {
+        LIBAFB_ERROR("Error calling afb_mqtt_client\n");
+        return -1;
+    }
+
+    handler->mosq = mosq;
+
+    int rc = mosquitto_connect(mosq, handler->broker_host, handler->broker_port,
+                               /* keepalive = */ 5);
+    if (rc != MOSQ_ERR_SUCCESS) {
+        LIBAFB_ERROR("Error on connect: %s", mosquitto_strerror(rc));
+        return -1;
+    }
+
+    if (handler->to_mqtt.subscribe_topic) {
+        rc = mosquitto_subscribe(mosq, NULL, handler->to_mqtt.subscribe_topic, /* qos = */ 0);
+        if (rc != MOSQ_ERR_SUCCESS) {
+            LIBAFB_ERROR("Cannot connect to %s: %s", handler->to_mqtt.subscribe_topic,
+                         mosquitto_strerror(rc));
+            return -1;
+        }
+    }
+
+    mosquitto_message_callback_set(mosq, on_mqtt_message);
+
+    // Start a thread to handle requests
+    mosquitto_loop_start(mosq);
+
+    LIBAFB_NOTICE("Extension %s ready to serve", AfbExtensionManifest.name);
+    return 0;
+}
+
+int AfbExtensionExitV1(void *data, struct afb_apiset *declare_set)
+{
+    struct mqtt_ext_handler_t *handler = (struct mqtt_ext_handler_t *)data;
+    LIBAFB_NOTICE("Extension %s got to exit", AfbExtensionManifest.name);
+    mosquitto_loop_stop(handler->mosq, /* force = */ true);
+
+    mqtt_ext_handler_delete(data);
+    return 0;
+}
