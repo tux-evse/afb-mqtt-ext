@@ -162,14 +162,22 @@ struct from_mqtt_t
     int timeout_ms;
     struct message_extractor_t request_extractor;
     json_object *response_template;
-
-    // struct stored_request_t received_requests[REQUEST_QUEUE_LEN];
+    struct message_extractor_t event_extractor;
 };
 
 bool from_mqtt_is_request(struct from_mqtt_t *self, json_object *message)
 {
     if (self->request_extractor.filter) {
         return json_path_filter_does_apply(self->request_extractor.filter, message);
+    }
+    // if no filter is defined
+    return true;
+}
+
+bool from_mqtt_is_event(struct from_mqtt_t *self, json_object *message)
+{
+    if (self->event_extractor.filter) {
+        return json_path_filter_does_apply(self->event_extractor.filter, message);
     }
     // if no filter is defined
     return true;
@@ -339,6 +347,30 @@ int AfbExtensionConfigV1(void **data, struct json_object *config, const char *ui
                     g_handler->from_mqtt.request_extractor.filter = path_filter;
                 }
             }
+            if (json_object_object_get_ex(from_mqtt_json, "event-extraction", &json_item)) {
+                json_object *extraction = json_item;
+                if (json_object_object_get_ex(extraction, "data-path", &json_item)) {
+                    g_handler->from_mqtt.event_extractor.data_path =
+                        strdup(json_object_get_string(json_item));
+                }
+                if (json_object_object_get_ex(extraction, "verb-path", &json_item)) {
+                    g_handler->from_mqtt.event_extractor.verb_path =
+                        strdup(json_object_get_string(json_item));
+                }
+                if (json_object_object_get_ex(extraction, "filter", &json_item)) {
+                    json_object *filter = json_item;
+                    char *path = NULL;
+                    json_object *value = NULL;
+                    if (json_object_object_get_ex(filter, "path", &json_item)) {
+                        path = (char *)json_object_get_string(json_item);
+                    }
+                    if (json_object_object_get_ex(filter, "value", &json_item)) {
+                        value = json_item;
+                    }
+                    struct json_path_filter_t *path_filter = json_path_filter_new(path, value);
+                    g_handler->from_mqtt.event_extractor.filter = path_filter;
+                }
+            }
         }
     }
     // TODO: wrap macro LIBAFB_ERROR
@@ -394,10 +426,12 @@ void on_verb_call_reply(struct afb_req_common *req,
     printf("**REPLIED status: %d nreplies: %d\n", status, nreplies);
 
     if (status) {
+        // TODO error message
         return;
     }
 
     json_object *mapping = json_object_new_object();
+    // TODO id matching
     json_object_object_add(mapping, "id",
                            json_object_get(json_object_get_path(my_req->request_json, ".id")));
     json_object_object_add(mapping, "verb", json_object_new_string(req->verbname));
@@ -413,15 +447,31 @@ void on_verb_call_reply(struct afb_req_common *req,
                       /* qos = */ 0, /* retain = */ false);
 }
 
-void on_req_unref(struct afb_req_common *req)
+void on_my_req_unref(struct afb_req_common *req)
 {
-    printf("ON UNREF\n");
+    printf("ON MY REQ UNREF\n");
     struct my_req_t *my_req = containerof(struct my_req_t, req, req);
     json_object_put(my_req->request_json);
     free(my_req);
 }
 
-struct afb_req_common_query_itf query_itf = {.reply = on_verb_call_reply, .unref = on_req_unref};
+void on_verb_call_no_reply(struct afb_req_common *req,
+                           int status,
+                           unsigned nreplies,
+                           struct afb_data *const replies[])
+{
+}
+
+void on_req_unref(struct afb_req_common *req)
+{
+    printf("ON REQ UNREF\n");
+    free(req);
+}
+
+struct afb_req_common_query_itf verb_call_itf = {.reply = on_verb_call_reply,
+                                                 .unref = on_my_req_unref};
+struct afb_req_common_query_itf verb_call_no_reply_itf = {.reply = on_verb_call_no_reply,
+                                                          .unref = on_req_unref};
 
 void on_mqtt_message(struct mosquitto *mosq, void *user_data, const struct mosquitto_message *msg)
 {
@@ -441,19 +491,14 @@ void on_mqtt_message(struct mosquitto *mosq, void *user_data, const struct mosqu
         return;
     }
 
-    // Is it a request ?
+    int request_idx;
+
     if (from_mqtt_is_request(&handler->from_mqtt, mqtt_json)) {
-        // TODO async call a verb
-        // wait for the response
-        // and publish it to mqtt
         json_object *verb =
             json_object_get_path(mqtt_json, handler->from_mqtt.request_extractor.verb_path);
         const char *verb_str = verb ? json_object_get_string(verb) : NULL;
         json_object *data =
             json_object_get_path(mqtt_json, handler->from_mqtt.request_extractor.data_path);
-
-        printf("** mqtt_json: %s\n", json_object_get_string(mqtt_json));
-        printf("** CALL verb: %s args: %s\n", verb_str, json_object_get_string(data));
 
         struct my_req_t *my_req = malloc(sizeof(struct my_req_t));
         my_req->request_json = json_object_get(mqtt_json);
@@ -464,16 +509,29 @@ void on_mqtt_message(struct mosquitto *mosq, void *user_data, const struct mosqu
                              strlen(call_type) + 1);
         afb_data_create_raw(&reply[1], &afb_type_predefined_json_c, json_object_get(data), 0,
                             (void *)json_object_put, data);
-        afb_req_common_init(&my_req->req, /* afb_req_common_query_itf = */ &query_itf,
+        afb_req_common_init(&my_req->req, /* afb_req_common_query_itf = */ &verb_call_itf,
                             g_handler->from_mqtt.api_name, verb_str, 2, reply, NULL);
         afb_req_common_process(&my_req->req, handler->call_set);
     }
-    else {
-        printf("Not a request\n");
-    }
+    else if (from_mqtt_is_event(&handler->from_mqtt, mqtt_json)) {
+        json_object *verb =
+            json_object_get_path(mqtt_json, handler->from_mqtt.event_extractor.verb_path);
+        const char *verb_str = verb ? json_object_get_string(verb) : NULL;
+        json_object *data =
+            json_object_get_path(mqtt_json, handler->from_mqtt.event_extractor.data_path);
 
-    int request_idx = to_mqtt_match_reponse(&handler->to_mqtt, mqtt_json);
-    if (request_idx != -1) {
+        struct afb_req_common *req = malloc(sizeof(struct afb_req_common));
+        struct afb_data *reply[2];
+        char *call_type = "event";
+        afb_data_create_copy(&reply[0], &afb_type_predefined_stringz, call_type,
+                             strlen(call_type) + 1);
+        afb_data_create_raw(&reply[1], &afb_type_predefined_json_c, json_object_get(data), 0,
+                            (void *)json_object_put, data);
+        afb_req_common_init(req, /* afb_req_common_query_itf = */ &verb_call_no_reply_itf,
+                            g_handler->from_mqtt.api_name, verb_str, 2, reply, NULL);
+        afb_req_common_process(req, handler->call_set);
+    }
+    else if((request_idx = to_mqtt_match_reponse(&handler->to_mqtt, mqtt_json)) != -1) {
         struct stored_request_t *stored_request = &handler->to_mqtt.stored_requests[request_idx];
 
         // disarm the response timeout
