@@ -50,8 +50,7 @@ json_object *json_object_fill_template(json_object *jso, json_object *mapping)
         size_t len = json_object_array_length(jso);
         for (size_t i = 0; i < len; i++) {
             json_object_array_put_idx(
-                output, i,
-                json_object_fill_template(json_object_array_get_idx(jso, i), mapping));
+                output, i, json_object_fill_template(json_object_array_get_idx(jso, i), mapping));
         }
         return output;
     }
@@ -81,4 +80,38 @@ json_object *json_object_fill_template(json_object *jso, json_object *mapping)
         // just copy by incrementing the ref
         return json_object_get(jso);
     }
+}
+
+struct json_path_filter_t
+{
+    char *path;
+    json_object *expected_value;
+};
+
+struct json_path_filter_t *json_path_filter_new(char *path, json_object *expected_value)
+{
+    struct json_path_filter_t *filter = calloc(1, sizeof(struct json_path_filter_t));
+    filter->path = strdup(path);
+    filter->expected_value = json_object_get(expected_value);
+    return filter;
+}
+
+void json_path_filter_delete(struct json_path_filter_t *self)
+{
+    if (self->path)
+        free(self->path);
+    if (self->expected_value)
+        json_object_put(self->expected_value);
+}
+
+bool json_path_filter_does_apply(struct json_path_filter_t *self, json_object *obj)
+{
+    json_object *sub = json_object_get_path(obj, self->path);
+    if (!sub)
+        return false;
+    
+    // for now only string comparison are supported
+    const char *value_str = json_object_get_string(sub);
+    const char *expected_value_str = json_object_get_string(self->expected_value);
+    return !strcmp(value_str, expected_value_str);
 }

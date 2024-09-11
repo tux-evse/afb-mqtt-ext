@@ -16,3 +16,26 @@ to-mqtt:
       value: response
     data-path: .data
 
+from-mqtt:
+  # the AFB API to call
+  api: josev
+  request-extraction:
+    verb-path: .name
+    data-path: .data
+    filter:
+      path: .type
+      value: request
+  response-template:
+    id: ${id}
+    name: ${verb}
+    type: response
+    data: ${data}
+
+  # this will call a verb, but won't generate a response
+  event-extraction:
+    verb-path: .name
+    data-path: .data
+    filter:
+      path: .type
+      value: update
+

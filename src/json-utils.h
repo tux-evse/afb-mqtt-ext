@@ -7,6 +7,8 @@
 #ifndef MQTT_JSON_UTILS
 #define MQTT_JSON_UTILS
 
+#include <stdbool.h>
+
 #include <json-c/json.h>
 
 /**
@@ -54,5 +56,14 @@ json_object *json_object_get_path(json_object *obj, const char *path);
  *         replaced by their values
  */
 json_object *json_object_fill_template(json_object *obj, json_object *mapping);
+
+struct json_path_filter_t;
+
+struct json_path_filter_t *json_path_filter_new(char *path,
+                                                json_object *expected_value);
+
+bool json_path_filter_does_apply(struct json_path_filter_t *self, json_object *obj);
+
+void json_path_filter_delete(struct json_path_filter_t *self);
 
 #endif
