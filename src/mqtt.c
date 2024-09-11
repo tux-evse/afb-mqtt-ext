@@ -37,7 +37,6 @@ const struct argp_option AfbExtensionOptionsV1[] = {{.name = "mqtt-config-file",
 
 struct message_extractor_t
 {
-    char *id_path;  // FIXME useless?
     char *data_path;
 
     // only useful for requests
@@ -48,8 +47,6 @@ struct message_extractor_t
 
 void message_extractor_delete(struct message_extractor_t *self)
 {
-    if (self->id_path)
-        free(self->id_path);
     if (self->data_path)
         free(self->data_path);
     if (self->filter) {
