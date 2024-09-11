@@ -49,6 +49,14 @@ json_object *json_object_get_path(json_object *obj, const char *path);
  * "mapping" object like {"my_data": {"ok": 42}}, the returned JSON
  * object will be {"data": {"ok": 42}}
  *
+ * If the name of the placeholder contains a dot ('.'), the part before
+ * the dot refers to the key in the mapping and the rest to a JSON
+ * "path" inside the associated value.
+ * 
+ * e.g. considering the mapping of
+ * the last example, a template like '{"data": "${my_data.ok}"}' will
+ * give '{"data": 42}'
+ *
  * @param obj     the input JSON object to parse as a template
  * @param mapping the mapping of values used to fill the template
  *

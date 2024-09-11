@@ -429,8 +429,7 @@ void on_verb_call_reply(struct afb_req_common *req,
 
     json_object *mapping = json_object_new_object();
     // TODO id matching
-    json_object_object_add(mapping, "id",
-                           json_object_get(json_object_get_path(my_req->request_json, ".id")));
+    json_object_object_add(mapping, "request", json_object_get(my_req->request_json));
     json_object_object_add(mapping, "verb", json_object_new_string(req->verbname));
 
     json_object *reply_data = afb_data_ro_pointer(replies[0]);
@@ -442,6 +441,8 @@ void on_verb_call_reply(struct afb_req_common *req,
     mosquitto_publish(g_handler->mosq, /* mid = */ NULL, g_handler->publish_topic,
                       strlen(filled_str), filled_str,
                       /* qos = */ 0, /* retain = */ false);
+
+    json_object_put(filled);
 }
 
 void on_my_req_unref(struct afb_req_common *req)
@@ -528,7 +529,7 @@ void on_mqtt_message(struct mosquitto *mosq, void *user_data, const struct mosqu
                             g_handler->from_mqtt.api_name, verb_str, 2, reply, NULL);
         afb_req_common_process(req, handler->call_set);
     }
-    else if((request_idx = to_mqtt_match_reponse(&handler->to_mqtt, mqtt_json)) != -1) {
+    else if ((request_idx = to_mqtt_match_reponse(&handler->to_mqtt, mqtt_json)) != -1) {
         struct stored_request_t *stored_request = &handler->to_mqtt.stored_requests[request_idx];
 
         // disarm the response timeout

@@ -70,6 +70,16 @@ json_object *json_object_fill_template(json_object *jso, json_object *mapping)
             strncpy(tag, str + 2, len - 3);
             tag[len - 3] = 0;
             json_object *replace = NULL;
+
+            char* dot = strchr(tag, '.');
+            if (dot) {
+                // e.g. request.id
+                char tag2[dot - tag+1];
+                strncpy(tag2, tag, dot-tag);
+                if (json_object_object_get_ex(mapping, tag2, &replace)) {
+                    return json_object_get(json_object_get_path(replace, dot));
+                }
+            }
             if (json_object_object_get_ex(mapping, tag, &replace)) {
                 // increment the ref of replace
                 return json_object_get(replace);
