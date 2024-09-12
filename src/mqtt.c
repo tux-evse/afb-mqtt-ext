@@ -287,7 +287,7 @@ int AfbExtensionConfigV1(void **data, struct json_object *config, const char *ui
             if (json_object_object_get_ex(to_mqtt_json, "request-template", &json_item)) {
                 g_handler->to_mqtt.request_template = json_object_get(json_item);
             }
-            if (json_object_object_get_ex(to_mqtt_json, "response-filter", &json_item)) {
+            if (json_object_object_get_ex(to_mqtt_json, "response-extraction", &json_item)) {
                 json_object *response_filter = json_item;
                 if (json_object_object_get_ex(response_filter, "data-path", &json_item)) {
                     g_handler->to_mqtt.response_extractor.data_path =

@@ -10,7 +10,7 @@ to-mqtt:
     name: ${verb}
     type: request
     data: ${data}
-  response-filter:
+  response-extraction:
     filter:
       path: .type
       value: response
