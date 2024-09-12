@@ -428,7 +428,6 @@ void on_verb_call_reply(struct afb_req_common *req,
     }
 
     json_object *mapping = json_object_new_object();
-    // TODO id matching
     json_object_object_add(mapping, "request", json_object_get(my_req->request_json));
     json_object_object_add(mapping, "verb", json_object_new_string(req->verbname));
 
@@ -558,6 +557,20 @@ void on_mqtt_message(struct mosquitto *mosq, void *user_data, const struct mosqu
     json_object_put(mqtt_json);
 }
 
+json_object *make_uuid()
+{
+    uuid_t uuid;
+    uuid_generate((unsigned char *)&uuid);
+    char uuid_str[37];
+    snprintf(uuid_str, 37, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+             uuid[0], uuid[1], uuid[2], uuid[3], uuid[4], uuid[5], uuid[6], uuid[7], uuid[8],
+             uuid[9], uuid[10], uuid[11], uuid[12], uuid[13], uuid[14], uuid[15]);
+    return json_object_new_string(uuid_str);
+}
+
+struct template_function_t id_functions[] = {{.function_name = "uuid", .generator = make_uuid},
+                                             {.function_name = NULL}};
+
 static void on_to_mqtt_request(void *closure, struct afb_req_common *req)
 {
     struct mqtt_ext_handler_t *handler = (struct mqtt_ext_handler_t *)g_handler;
@@ -577,19 +590,12 @@ static void on_to_mqtt_request(void *closure, struct afb_req_common *req)
     json_object *arg = afb_data_ro_pointer(arg_json);
 
     if (handler->publish_topic) {
-        uuid_t uuid;
-        uuid_generate((unsigned char *)&uuid);
-        char uuid_str[37];
-        snprintf(uuid_str, 37,
-                 "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x", uuid[0],
-                 uuid[1], uuid[2], uuid[3], uuid[4], uuid[5], uuid[6], uuid[7], uuid[8], uuid[9],
-                 uuid[10], uuid[11], uuid[12], uuid[13], uuid[14], uuid[15]);
         json_object *mapping = json_object_new_object();
-        json_object_object_add(mapping, "id", json_object_new_string(uuid_str));
         json_object_object_add(mapping, "verb", json_object_new_string(req->verbname));
         json_object_object_add(mapping, "data", arg);
 
-        json_object *filled = json_object_fill_template(handler->to_mqtt.request_template, mapping);
+        json_object *filled = json_object_fill_template_with_functions(
+            handler->to_mqtt.request_template, mapping, id_functions);
         const char *request_str = json_object_get_string(filled);
 
         mosquitto_publish(handler->mosq, /* mid = */ NULL, handler->publish_topic,

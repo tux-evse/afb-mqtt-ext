@@ -10,6 +10,8 @@
 #include <stdbool.h>
 #include <string.h>
 
+#include <stdio.h>
+
 json_object *json_object_get_path(json_object *obj, const char *path)
 {
     size_t offset = 0;
@@ -42,15 +44,27 @@ json_object *json_object_get_path(json_object *obj, const char *path)
     }
 }
 
-json_object *json_object_fill_template(json_object *jso, json_object *mapping)
+struct template_function_t *template_functions_find(struct template_function_t *functions,
+                                                    char *function_name)
+{
+    struct template_function_t *p = functions;
+    while (p->function_name && strcmp(p->function_name, function_name))
+        p++;
+    return p->function_name ? p : NULL;
+}
+
+json_object *json_object_fill_template_with_functions(json_object *jso,
+                                                      json_object *mapping,
+                                                      struct template_function_t *functions)
 {
     switch (json_object_get_type(jso)) {
     case json_type_array: {
         json_object *output = json_object_new_array();
         size_t len = json_object_array_length(jso);
         for (size_t i = 0; i < len; i++) {
-            json_object_array_put_idx(
-                output, i, json_object_fill_template(json_object_array_get_idx(jso, i), mapping));
+            json_object_array_put_idx(output, i,
+                                      json_object_fill_template_with_functions(
+                                          json_object_array_get_idx(jso, i), mapping, functions));
         }
         return output;
     }
@@ -58,7 +72,8 @@ json_object *json_object_fill_template(json_object *jso, json_object *mapping)
         json_object *output = json_object_new_object();
         json_object_object_foreach(jso, key, value)
         {
-            json_object_object_add(output, key, json_object_fill_template(value, mapping));
+            json_object_object_add(
+                output, key, json_object_fill_template_with_functions(value, mapping, functions));
         }
         return output;
     }
@@ -71,13 +86,26 @@ json_object *json_object_fill_template(json_object *jso, json_object *mapping)
             tag[len - 3] = 0;
             json_object *replace = NULL;
 
-            char* dot = strchr(tag, '.');
+            char *dot = strchr(tag, '.');
             if (dot) {
                 // e.g. request.id
-                char tag2[dot - tag+1];
-                strncpy(tag2, tag, dot-tag);
+                char tag2[dot - tag + 1];
+                strncpy(tag2, tag, dot - tag);
                 if (json_object_object_get_ex(mapping, tag2, &replace)) {
                     return json_object_get(json_object_get_path(replace, dot));
+                }
+            }
+            printf("not dot, tag: %s\n", tag);
+
+            char *function_call = strstr(tag, "()");
+            if (function_call) {
+                char function_name[function_call - tag + 1];
+                strncpy(function_name, tag, function_call - tag);
+                function_name[function_call - tag] = 0;
+                struct template_function_t *function =
+                    template_functions_find(functions, function_name);
+                if (function) {
+                    return function->generator();
                 }
             }
             if (json_object_object_get_ex(mapping, tag, &replace)) {
@@ -90,6 +118,11 @@ json_object *json_object_fill_template(json_object *jso, json_object *mapping)
         // just copy by incrementing the ref
         return json_object_get(jso);
     }
+}
+
+json_object *json_object_fill_template(json_object *jso, json_object *mapping)
+{
+    return json_object_fill_template_with_functions(jso, mapping, NULL);
 }
 
 struct json_path_filter_t
@@ -119,7 +152,7 @@ bool json_path_filter_does_apply(struct json_path_filter_t *self, json_object *o
     json_object *sub = json_object_get_path(obj, self->path);
     if (!sub)
         return false;
-    
+
     // for now only string comparison are supported
     const char *value_str = json_object_get_string(sub);
     const char *expected_value_str = json_object_get_string(self->expected_value);

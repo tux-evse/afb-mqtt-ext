@@ -57,13 +57,24 @@ json_object *json_object_get_path(json_object *obj, const char *path);
  * the last example, a template like '{"data": "${my_data.ok}"}' will
  * give '{"data": 42}'
  *
- * @param obj     the input JSON object to parse as a template
- * @param mapping the mapping of values used to fill the template
+ * @param obj       the input JSON object to parse as a template
+ * @param mapping   the mapping of values used to fill the template
  *
  * @return a copy of the input JSON object where special strings are
  *         replaced by their values
  */
 json_object *json_object_fill_template(json_object *obj, json_object *mapping);
+
+struct template_function_t {
+    char *function_name;
+    json_object * (*generator)();
+};
+
+/*
+ * @param functions an array of template functions. Can be NULL.
+ *                  The last element of a NULL function_name
+ * */
+json_object *json_object_fill_template_with_functions(json_object *obj, json_object* mapping, struct template_function_t *functions);
 
 struct json_path_filter_t;
 

@@ -6,7 +6,7 @@ subscribe-topic: josev/cs
 to-mqtt:
   timeout-ms: 10000
   request-template:
-    id: ${id}
+    id: ${uuid()}
     name: ${verb}
     type: request
     data: ${data}
