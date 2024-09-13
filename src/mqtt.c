@@ -30,6 +30,8 @@
 
 AFB_EXTENSION("MQTT")
 
+#define TO_MQTT_API_NAME "to_mqtt"
+
 #define TIMEOUT_ERROR 1
 
 const struct argp_option AfbExtensionOptionsV1[] = {{.name = "mqtt-config-file",
@@ -617,7 +619,7 @@ int AfbExtensionDeclareV1(void *data, struct afb_apiset *declare_set, struct afb
     ds = afb_apiset_subset_find(ds, "public");
 
     int rc;
-    if ((rc = afb_apiset_add(ds, "to_mqtt", to_mqtt_api_item)) < 0) {
+    if ((rc = afb_apiset_add(ds, TO_MQTT_API_NAME, to_mqtt_api_item)) < 0) {
         LIBAFB_ERROR("Error calling afb_apiset_add (to_mqtt): %d\n", rc);
     }
 
