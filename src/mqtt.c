@@ -30,6 +30,8 @@
 
 AFB_EXTENSION("MQTT")
 
+#define TIMEOUT_ERROR 1
+
 const struct argp_option AfbExtensionOptionsV1[] = {{.name = "mqtt-config-file",
                                                      .key = 's',
                                                      .arg = "PATH",
@@ -384,7 +386,7 @@ void on_response_timeout(int signal, void *data)
     struct afb_data *reply;
     afb_data_create_raw(&reply, &afb_type_predefined_stringz, "Timeout waiting for response", 0,
                         NULL, NULL);
-    afb_req_common_reply(req, AFB_ERRNO_TIMEOUT, 1, &reply);
+    afb_req_common_reply(req, TIMEOUT_ERROR, 1, &reply);
     afb_req_common_unref(req);
 }
 
