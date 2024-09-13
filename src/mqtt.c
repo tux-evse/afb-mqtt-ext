@@ -17,14 +17,13 @@
 
 #include <rp-utils/rp-jsonc.h>
 #include <rp-utils/rp-yaml.h>
+#include <rp-utils/rp-uuid.h>
 
 #include <mosquitto.h>
-#include <uuid/uuid.h>
 
 #include "json-utils.h"
 
 // TODO use fd/select rather than a thread for MQTT
-// TODO use uuid function in rp-utils
 // TODO ability to AND filters ?
 
 AFB_EXTENSION("MQTT")
@@ -488,13 +487,9 @@ void on_mqtt_message(struct mosquitto *mosq, void *user_data, const struct mosqu
  */
 json_object *make_uuid()
 {
-    uuid_t uuid;
-    uuid_generate((unsigned char *)&uuid);
-    char uuid_str[37];
-    snprintf(uuid_str, 37, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-             uuid[0], uuid[1], uuid[2], uuid[3], uuid[4], uuid[5], uuid[6], uuid[7], uuid[8],
-             uuid[9], uuid[10], uuid[11], uuid[12], uuid[13], uuid[14], uuid[15]);
-    return json_object_new_string(uuid_str);
+    rp_uuid_stringz_t uuid;
+    rp_uuid_new_stringz(uuid);
+    return json_object_new_string(uuid);
 }
 
 struct template_function_t id_functions[] = {{.function_name = "uuid", .generator = make_uuid},
