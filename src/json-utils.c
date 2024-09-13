@@ -95,7 +95,6 @@ json_object *json_object_fill_template_with_functions(json_object *jso,
                     return json_object_get(json_object_get_path(replace, dot));
                 }
             }
-            printf("not dot, tag: %s\n", tag);
 
             char *function_call = strstr(tag, "()");
             if (function_call) {
@@ -157,4 +156,17 @@ bool json_path_filter_does_apply(struct json_path_filter_t *self, json_object *o
     const char *value_str = json_object_get_string(sub);
     const char *expected_value_str = json_object_get_string(self->expected_value);
     return !strcmp(value_str, expected_value_str);
+}
+
+struct json_path_filter_t *json_path_filter_from_json_config(json_object *json_config)
+{
+    char *path = NULL;
+    json_object *value = NULL, *json_item = NULL;
+    if (json_object_object_get_ex(json_config, "path", &json_item)) {
+        path = (char *)json_object_get_string(json_item);
+    }
+    if (json_object_object_get_ex(json_config, "value", &json_item)) {
+        value = json_item;
+    }
+    return json_path_filter_new(path, value);
 }

@@ -52,7 +52,7 @@ json_object *json_object_get_path(json_object *obj, const char *path);
  * If the name of the placeholder contains a dot ('.'), the part before
  * the dot refers to the key in the mapping and the rest to a JSON
  * "path" inside the associated value.
- * 
+ *
  * e.g. considering the mapping of
  * the last example, a template like '{"data": "${my_data.ok}"}' will
  * give '{"data": 42}'
@@ -65,21 +65,25 @@ json_object *json_object_get_path(json_object *obj, const char *path);
  */
 json_object *json_object_fill_template(json_object *obj, json_object *mapping);
 
-struct template_function_t {
+struct template_function_t
+{
     char *function_name;
-    json_object * (*generator)();
+    json_object *(*generator)();
 };
 
 /*
  * @param functions an array of template functions. Can be NULL.
  *                  The last element of a NULL function_name
  * */
-json_object *json_object_fill_template_with_functions(json_object *obj, json_object* mapping, struct template_function_t *functions);
+json_object *json_object_fill_template_with_functions(json_object *obj,
+                                                      json_object *mapping,
+                                                      struct template_function_t *functions);
 
 struct json_path_filter_t;
 
-struct json_path_filter_t *json_path_filter_new(char *path,
-                                                json_object *expected_value);
+struct json_path_filter_t *json_path_filter_new(char *path, json_object *expected_value);
+
+struct json_path_filter_t *json_path_filter_from_json_config(json_object *json_config);
 
 bool json_path_filter_does_apply(struct json_path_filter_t *self, json_object *obj);
 
