@@ -18,11 +18,11 @@ to-mqtt:
   event-config:
     registrations:
       # verbs to call to subscribe to events
-      - api: josev
-        verb: test_event
+      - api: test
+        verb: subscribe
         args:
           action: subscribe
-        event: mytest
+        event: py-event
     template:
       id: ${uuid()}
       name: ${event_name}
