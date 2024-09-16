@@ -257,6 +257,8 @@ struct mqtt_ext_handler_t
     struct to_mqtt_t to_mqtt;
     struct from_mqtt_t from_mqtt;
     struct afb_apiset *call_set;
+
+    struct ev_fd *efd;
 };
 
 struct mqtt_ext_handler_t g_handler;
@@ -782,6 +784,17 @@ int AfbExtensionHTTPV1(void *data, struct afb_hsrv *hsrv)
     return 0;
 }
 
+void internal_mosquitto_loop(struct ev_fd *efd, int fd, uint32_t revents, void *closure)
+{
+    struct mosquitto *mosq = closure;
+
+    mosquitto_loop_read(mosq, /* UNUSED */ 1);
+    if (mosquitto_want_write(mosq)) {
+        mosquitto_loop_write(mosq, /* UNUSED */ 1);
+    }
+    mosquitto_loop_misc(mosq);
+}
+
 int AfbExtensionServeV1(void *data, struct afb_apiset *call_set)
 {
     if (mosquitto_lib_init() != MOSQ_ERR_SUCCESS) {
@@ -818,9 +831,18 @@ int AfbExtensionServeV1(void *data, struct afb_apiset *call_set)
 
     mosquitto_message_callback_set(mosq, on_mqtt_message);
 
-    // Start a thread to handle requests
-    mosquitto_loop_start(mosq);
+    // Instead of mosquitto_loop_start() that would start a new thread,
+    // we insert the mosquitto loop in the main AFB event loop
 
+    mosquitto_threaded_set(mosq, true);
+    int mosquitto_socket_fd = mosquitto_socket(mosq);
+
+    // struct ev_fd *efd = NULL;
+    afb_ev_mgr_add_fd(&g_handler.efd, mosquitto_socket_fd, EPOLLIN | EPOLLOUT,
+                      internal_mosquitto_loop,
+                      /* closure = */ mosq, /* autounref = */ 1, /* autoclose = */ 1);
+
+    // Call event registration verbs, if needed
     init_event_registrations();
 
     LIBAFB_NOTICE("Extension %s ready to serve", AfbExtensionManifest.name);
@@ -831,7 +853,7 @@ int AfbExtensionExitV1(void *data, struct afb_apiset *declare_set)
 {
     LIBAFB_NOTICE("Extension %s got to exit", AfbExtensionManifest.name);
 
-    mosquitto_loop_stop(g_handler.mosq, /* force = */ true);
+    afb_ev_mgr_prepare_wait_dispatch_release(1000);
 
     mqtt_ext_handler_delete(&g_handler);
 
