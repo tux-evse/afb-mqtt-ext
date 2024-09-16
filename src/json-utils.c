@@ -91,6 +91,7 @@ json_object *json_object_fill_template_with_functions(json_object *jso,
                 // e.g. request.id
                 char tag2[dot - tag + 1];
                 strncpy(tag2, tag, dot - tag);
+                tag2[dot - tag] = 0;
                 if (json_object_object_get_ex(mapping, tag2, &replace)) {
                     return json_object_get(json_object_get_path(replace, dot));
                 }

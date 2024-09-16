@@ -16,8 +16,8 @@
 #include <libafb/core/afb-req-common.h>
 
 #include <rp-utils/rp-jsonc.h>
-#include <rp-utils/rp-yaml.h>
 #include <rp-utils/rp-uuid.h>
+#include <rp-utils/rp-yaml.h>
 
 #include <mosquitto.h>
 
@@ -213,10 +213,10 @@ struct from_mqtt_t
     char *api_name;
 
     int timeout_ms;
-    
+
     struct message_extractor_t request_extractor;
     json_object *response_template;
-    
+
     struct message_extractor_t event_extractor;
 };
 
@@ -339,7 +339,7 @@ struct my_req_t
 /**
  * Called in the "from_mqtt" direction when an afb verb has been called
  * following an MQTT message reception.
- * 
+ *
  * It published an MQTT response wrapping data replied by the afb verb
  */
 void on_verb_call_reply(struct afb_req_common *req,
@@ -387,6 +387,7 @@ void on_verb_call_no_reply(struct afb_req_common *req,
 
 void on_req_unref(struct afb_req_common *req)
 {
+    free((char *)req->verbname);
     free(req);
 }
 
@@ -423,6 +424,7 @@ void on_mqtt_message(struct mosquitto *mosq, void *user_data, const struct mosqu
         const char *verb_str = verb ? json_object_get_string(verb) : NULL;
         json_object *data =
             json_object_get_path(mqtt_json, g_handler.from_mqtt.request_extractor.data_path);
+        data = data ? json_object_get(data) : json_object_new_null();
 
         struct my_req_t *my_req = malloc(sizeof(struct my_req_t));
         my_req->request_json = json_object_get(mqtt_json);
@@ -431,29 +433,34 @@ void on_mqtt_message(struct mosquitto *mosq, void *user_data, const struct mosqu
         char *call_type = "request";
         afb_data_create_copy(&reply[0], &afb_type_predefined_stringz, call_type,
                              strlen(call_type) + 1);
-        afb_data_create_raw(&reply[1], &afb_type_predefined_json_c, json_object_get(data), 0,
+        afb_data_create_raw(&reply[1], &afb_type_predefined_json_c, data, 0,
                             (void *)json_object_put, data);
         afb_req_common_init(&my_req->req, /* afb_req_common_query_itf = */ &verb_call_itf,
                             g_handler.from_mqtt.api_name, verb_str, 2, reply, NULL);
         afb_req_common_process(&my_req->req, g_handler.call_set);
+
+        json_object_put(mqtt_json);
     }
     else if (from_mqtt_is_event(&g_handler.from_mqtt, mqtt_json)) {
         json_object *verb =
             json_object_get_path(mqtt_json, g_handler.from_mqtt.event_extractor.verb_path);
-        const char *verb_str = verb ? json_object_get_string(verb) : NULL;
+        const char *verb_str = verb ? strdup(json_object_get_string(verb)) : NULL;
         json_object *data =
             json_object_get_path(mqtt_json, g_handler.from_mqtt.event_extractor.data_path);
+        data = data ? json_object_get(data) : json_object_new_null();
 
         struct afb_req_common *req = malloc(sizeof(struct afb_req_common));
         struct afb_data *reply[2];
         char *call_type = "event";
         afb_data_create_copy(&reply[0], &afb_type_predefined_stringz, call_type,
                              strlen(call_type) + 1);
-        afb_data_create_raw(&reply[1], &afb_type_predefined_json_c, json_object_get(data), 0,
+        afb_data_create_raw(&reply[1], &afb_type_predefined_json_c, data, 0,
                             (void *)json_object_put, data);
         afb_req_common_init(req, /* afb_req_common_query_itf = */ &verb_call_no_reply_itf,
                             g_handler.from_mqtt.api_name, verb_str, 2, reply, NULL);
         afb_req_common_process(req, g_handler.call_set);
+
+        json_object_put(mqtt_json);
     }
     else if ((request_idx = to_mqtt_match_reponse(&g_handler.to_mqtt, mqtt_json)) != -1) {
         struct stored_request_t *stored_request = &g_handler.to_mqtt.stored_requests[request_idx];
@@ -480,8 +487,9 @@ void on_mqtt_message(struct mosquitto *mosq, void *user_data, const struct mosqu
 
         // do not wait for a response to this request anymore
         to_mqtt_delete_stored_request(&g_handler.to_mqtt, request_idx);
+
+        json_object_put(mqtt_json);
     }
-    json_object_put(mqtt_json);
 }
 
 /**
@@ -545,7 +553,7 @@ struct afb_evt_listener *g_listener;
 
 /**
  * Called when an afb event we are subscribed to is pushed.
- * 
+ *
  * We publish an MQTT message in response.
  */
 void on_event_pushed(void *closure, const struct afb_evt_pushed *event)
@@ -555,7 +563,7 @@ void on_event_pushed(void *closure, const struct afb_evt_pushed *event)
 
     json_object *mapping = json_object_new_object();
     json_object_object_add(mapping, "event_name", json_object_new_string(afb_evt_name(event->evt)));
-    json_object_object_add(mapping, "data", data);
+    json_object_object_add(mapping, "data", json_object_get(data));
     json_object *filled = json_object_fill_template_with_functions(
         g_handler.to_mqtt.on_event_template, mapping, id_functions);
     json_object_put(mapping);
@@ -578,8 +586,13 @@ int on_subscribe(struct afb_req_common *req, struct afb_evt *event)
     return 0;
 }
 
+void on_req_unref2(struct afb_req_common *req)
+{
+    free(req);
+}
+
 struct afb_req_common_query_itf subscription_call_itf = {.reply = on_verb_call_no_reply,
-                                                         .unref = on_req_unref,
+                                                         .unref = on_req_unref2,
                                                          .subscribe = on_subscribe};
 
 /**
