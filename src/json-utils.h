@@ -70,9 +70,26 @@ struct template_function_t
     json_object *(*generator)();
 };
 
-/*
- * @param functions an array of template functions. Can be NULL.
- *                  The last element of a NULL function_name
+/**
+ * Treat a JSON object as a template where special strings may be
+ * replaced with some provided values
+ *
+ * This function behaves like json_object_fill_template, but is also
+ * able to interpret function calls.
+ *
+ * A function call is a special string of the form "${function_name()}".
+ * If the supplied array of template functions has an entry with the
+ * function name `function_name`, the json string is replaced by the
+ * result of the invocation of the generator function.
+ * 
+ * @param obj       the input JSON object to parse as a template
+ * @param mapping   the mapping of values used to fill the template
+ * @param functions an array of template functions. Can be NULL. The
+ *                  last element of the array must have a NULL
+ *                  function_name
+ * 
+ * @return a copy of the input JSON object where special strings are
+ *         replaced by their values* 
  * */
 json_object *json_object_fill_template_with_functions(json_object *obj,
                                                       json_object *mapping,
