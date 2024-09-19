@@ -19,16 +19,10 @@ test_verb_called = None
 my_event = None
 
 
-def test_verb_cb(req, request_type, data):
+def test_verb_cb(req, data):
     global test_verb_called
-    if request_type == "request":
-        return (0, {"toto": 42})
-    elif request_type == "event":
-        # response ignored
-        test_verb_called = True
-        return (0, {})
-    else:
-        assert False
+    test_verb_called = True
+    return (0, {"toto": 42})
 
 
 def subscribe_verb_cb(req, arg):
@@ -197,23 +191,49 @@ def test_from_mqtt(mqtt_p):
     assert cmd == "received"
     assert data == {"toto": 42}
 
+def test_from_mqtt_events(mqtt_p):
     # Test the "event" mode
-    global test_verb_called
-    test_verb_called = False
-    mqtt_p.send(
-        ("publish", {"id": "myid", "type": "update", "name": "test", "data": "toto"})
-    )
-    for _ in range(3):
-        if test_verb_called:
-            break
-        time.sleep(0.5)
-    assert test_verb_called
+    try:
+        libafb.callsync(binder, "from_mqtt", "subscribe")
+    except RuntimeError as e:
+        assert e.args[0] == "invalid-request"
+    try:
+        libafb.callsync(binder, "from_mqtt", "subscribe", 42)
+    except RuntimeError as e:
+        assert e.args[0] == "invalid-request"
 
+
+    r = libafb.callsync(binder, "from_mqtt", "subscribe", ["event1", "event2"])
+    assert r.status == 0
+
+
+    event_cb_called = {}
+    def test_event_cb(event_name: str):
+        def test_event_cb_(handler, afb_event_name, userdata, data):
+            nonlocal event_cb_called
+            assert afb_event_name == f"from_mqtt/event/{event_name}"
+            assert data == "toto"
+            event_cb_called[event_name] = True
+        return test_event_cb_
+    
+    for event_name in ("event1", "event2"):
+        libafb.evthandler(binder, {"pattern": f"from_mqtt/event/{event_name}", "callback": test_event_cb(event_name)}, None)
+        event_cb_called[event_name] = False
+
+        mqtt_p.send(
+            ("publish", {"id": "myid", "type": "update", "name": event_name, "data": "toto"})
+        )
+        for _ in range(3):
+            if event_cb_called[event_name]:
+                break
+            time.sleep(0.5)
+        assert event_cb_called[event_name]
 
 def afb_tests(handler, mqtt_p):
     test_to_mqtt(mqtt_p)
     test_to_mqtt_event(mqtt_p)
     test_from_mqtt(mqtt_p)
+    test_from_mqtt_events(mqtt_p)    
 
     mqtt_p.send(("end",))
 

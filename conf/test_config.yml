@@ -30,7 +30,7 @@ to-mqtt:
       data: ${data}
 
 from-mqtt:
-  # the AFB API to call
+  # the AFB API to call on requests
   api: test
   request-extraction:
     verb-path: .name
@@ -44,9 +44,9 @@ from-mqtt:
     type: response
     data: ${data}
 
-  # this will call a verb, but won't generate a response
+  # this will emit an event
   event-extraction:
-    verb-path: .name
+    event-name-path: .name
     data-path: .data
     filter:
       path: .type
