@@ -23,9 +23,6 @@
 
 #include "json-utils.h"
 
-// TODO ability to AND filters ?
-// TODO rework configuration from MQTT 5 vocabulary
-
 AFB_EXTENSION("MQTT")
 
 /**
@@ -94,8 +91,12 @@ struct stored_request_t
 struct to_mqtt_t
 {
     int timeout_ms;
+
     json_object *request_template;
+    char *request_correlation_path;
+
     struct message_extractor_t response_extractor;
+    char *response_correlation_path;
 
     /**
      * Very simple store of requests.
@@ -181,20 +182,21 @@ int to_mqtt_match_reponse(struct to_mqtt_t *self, json_object *response)
             // item deleted
             continue;
 
-        //
-        // FIXME id matching
-        json_object *request_id = json_object_get_path(sr->json_request, ".id");
-        if (!request_id)
-            continue;
-        const char *request_id_str = json_object_get_string(request_id);
-        json_object *response_id = json_object_get_path(response, ".id");
-        if (!response_id)
-            continue;
-        const char *response_id_str = json_object_get_string(response_id);
-        if (strcmp(response_id_str, request_id_str))
-            continue;
+        // Test correlation data to match the request
+        if (self->request_correlation_path && self->response_correlation_path) {
+            json_object *request_correlation_data =
+                json_object_get_path(sr->json_request, self->request_correlation_path);
+            json_object *response_correlation_data =
+                json_object_get_path(response, self->response_correlation_path);
+            if (request_correlation_data && response_correlation_data) {
+                const char *request_cd = json_object_get_string(request_correlation_data);
+                const char *response_cd = json_object_get_string(response_correlation_data);
+                if (strcmp(request_cd, response_cd))
+                    continue;
+            }
+        }
 
-        // Filter matching
+        // Additional filter matching
         if (self->response_extractor.filter) {
             if (json_path_filter_does_apply(self->response_extractor.filter, response)) {
                 json_object_put(sr->json_request);
@@ -445,8 +447,8 @@ void on_mqtt_message(struct mosquitto *mosq, void *user_data, const struct mosqu
         my_req->request_json = json_object_get(mqtt_json);
 
         struct afb_data *reply;
-        afb_data_create_raw(&reply, &afb_type_predefined_json_c, data, 0,
-                            (void *)json_object_put, data);
+        afb_data_create_raw(&reply, &afb_type_predefined_json_c, data, 0, (void *)json_object_put,
+                            data);
         afb_req_common_init(&my_req->req, /* afb_req_common_query_itf = */ &verb_call_itf,
                             g_handler.from_mqtt.api_name, verb_str, 1, &reply, NULL);
         afb_req_common_process(&my_req->req, g_handler.call_set);
@@ -761,20 +763,23 @@ int parse_config(json_object *config)
         if (to_mqtt_json) {
             json_object *extraction = NULL, *event_config = NULL;
 
-            rp_jsonc_unpack(to_mqtt_json, "{s?i s?O s?o s?o}",                        //
+            rp_jsonc_unpack(to_mqtt_json, "{s?i s?O s?o s?o s?s}",                    //
                             "timeout-ms", &g_handler.to_mqtt.timeout_ms,              //
                             "request-template", &g_handler.to_mqtt.request_template,  //
                             "response-extraction", &extraction,                       //
-                            "event-config", &event_config                             //
+                            "event-config", &event_config,                            //
+                            "request-correlation-path",
+                            &g_handler.to_mqtt.request_correlation_path  //
             );
 
             if (extraction) {
                 json_object *filter_json = NULL;
 
-                rp_jsonc_unpack(extraction, "{s?s s?o}",  //
+                rp_jsonc_unpack(extraction, "{s?s s?o s?s}",  //
                                 "data-path",
-                                &g_handler.to_mqtt.response_extractor.data_path,  //
-                                "filter", &filter_json                            //
+                                &g_handler.to_mqtt.response_extractor.data_path,                  //
+                                "filter", &filter_json,                                           //
+                                "correlation-path", &g_handler.to_mqtt.response_correlation_path  //
                 );
 
                 if (filter_json)
@@ -818,8 +823,9 @@ int parse_config(json_object *config)
 
                 rp_jsonc_unpack(event_extraction, "{s?s s?s s?o}",                            //
                                 "data-path", &g_handler.from_mqtt.event_extractor.data_path,  //
-                                "event-name-path", &g_handler.from_mqtt.event_extractor.verb_path,  //
-                                "filter", &filter_json                                        //
+                                "event-name-path",
+                                &g_handler.from_mqtt.event_extractor.verb_path,  //
+                                "filter", &filter_json                           //
                 );
 
                 if (filter_json)

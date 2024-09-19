@@ -10,11 +10,13 @@ to-mqtt:
     name: ${verb}
     type: request
     data: ${data}
+  request-correlation-path: .id
   response-extraction:
     filter:
       path: .type
       value: response
     data-path: .data
+    correlation-path: .id
   event-config:
     registrations:
       # verbs to call to subscribe to events
@@ -38,6 +40,7 @@ from-mqtt:
     filter:
       path: .type
       value: request
+
   response-template:
     id: ${request.id}
     name: ${verb}
