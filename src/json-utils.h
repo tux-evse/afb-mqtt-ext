@@ -4,8 +4,7 @@
  *
  */
 
-#ifndef MQTT_JSON_UTILS
-#define MQTT_JSON_UTILS
+#pragma once
 
 #include <stdbool.h>
 
@@ -88,5 +87,3 @@ struct json_path_filter_t *json_path_filter_from_json_config(json_object *json_c
 bool json_path_filter_does_apply(struct json_path_filter_t *self, json_object *obj);
 
 void json_path_filter_delete(struct json_path_filter_t *self);
-
-#endif
