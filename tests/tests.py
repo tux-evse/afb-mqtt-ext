@@ -134,6 +134,12 @@ def main():
 
     mqtt_process = mp.Process(target=mqtt_main, args=(mqtt_child,))
 
+    def run_tests(handle, mqtt_p):
+        tests = Tests(mqtt_p)
+        tests.run()
+
+        return 1
+
     try:
         signal.signal(signal.SIGINT, signal.default_int_handler)
         mqtt_process.start()
@@ -141,7 +147,9 @@ def main():
         if msg != "ready":
             raise RuntimeError()
 
-        libafb.loopstart(binder, afb_tests, mqtt_p)
+        libafb.loopstart(binder, run_tests, mqtt_p)
+
+        mqtt_p.send(("end",))
 
         mqtt_process.join()
 
@@ -149,95 +157,122 @@ def main():
         mqtt_process.terminate()
 
 
-def test_to_mqtt(mqtt_p):
-    # Test "to_mqtt" normal behaviour
-    # 1. we call the "to_mqtt" api
-    # 2. the extension will translate it to a publication on mqtt
-    # 3. since the verb is "echo", our mqtt callback will publish back our data as a response
-    for data_to_test in (42, "oki", {"key": "value"}):
-        r = libafb.callsync(binder, "to_mqtt", "echo", data_to_test)
-        assert r.status == 0
-        assert r.args[0] == data_to_test
+class Tests:
+    def __init__(self, mqtt_p):
+        self.mqtt_p = mqtt_p
 
-    # Test unexisting verb => timeout
-    r = libafb.callsync(binder, "to_mqtt", "blurp", {})
-    assert r.status == 1
-    assert "Timeout" in r.args[0]
+    def run(self):
+        """unittest-like member function selection"""
+        tests = [f for f in dir(self) if f.startswith("test_")]
+        for test_f in tests:
+            foo = getattr(self, test_f)
+            print(f"**** {test_f}")
+            foo()
 
+    def test_to_mqtt(self):
+        # Test "to_mqtt" normal behaviour
+        # 1. we call the "to_mqtt" api
+        # 2. the extension will translate it to a publication on mqtt
+        # 3. since the verb is "echo", our mqtt callback will publish back our data as a response
+        for data_to_test in (42, "oki", {"key": "value"}):
+            r = libafb.callsync(binder, "to_mqtt", "echo", data_to_test)
+            assert r.status == 0
+            assert r.args[0] == data_to_test
 
-def test_to_mqtt_event(mqtt_p):
-    # wait for subscription verb to be called on init
-    time.sleep(0.5)
+        # Test unexisting verb => timeout
+        r = libafb.callsync(binder, "to_mqtt", "blurp", {})
+        assert r.status == 1
+        assert "Timeout" in r.args[0]
 
-    # simulate an event coming
-    libafb.evtpush(my_event, "hello")
+    def test_to_mqtt_event(self):
+        # wait for subscription verb to be called on init
+        time.sleep(0.5)
 
-    # check that the mqtt message has been sent
-    cmd, data = mqtt_p.recv()
-    assert cmd == "received"
-    assert data == "hello"
+        # simulate an event coming
+        libafb.evtpush(my_event, "hello")
 
+        # check that the mqtt message has been sent
+        cmd, data = self.mqtt_p.recv()
+        assert cmd == "received"
+        assert data == "hello"
 
-def test_from_mqtt(mqtt_p):
-    # Test "from_mqtt"
-    # 1. we simulate a request from MQTT
-    # 2. the extension will translate it to a verb call on the "test" api
-    # 3. the test verb is implemented here and always return {"toto": 42} as data
-    # 4. the extension send an MQTT message back to the caller
-    mqtt_p.send(
-        ("publish", {"id": "myid", "type": "request", "name": "test", "data": "toto"})
-    )
-    cmd, data = mqtt_p.recv()
-    assert cmd == "received"
-    assert data == {"toto": 42}
-
-def test_from_mqtt_events(mqtt_p):
-    # Test the "event" mode
-    try:
-        libafb.callsync(binder, "from_mqtt", "subscribe")
-    except RuntimeError as e:
-        assert e.args[0] == "invalid-request"
-    try:
-        libafb.callsync(binder, "from_mqtt", "subscribe", 42)
-    except RuntimeError as e:
-        assert e.args[0] == "invalid-request"
-
-
-    r = libafb.callsync(binder, "from_mqtt", "subscribe", ["event1", "event2"])
-    assert r.status == 0
-
-
-    event_cb_called = {}
-    def test_event_cb(event_name: str):
-        def test_event_cb_(handler, afb_event_name, userdata, data):
-            nonlocal event_cb_called
-            assert afb_event_name == f"from_mqtt/event/{event_name}"
-            assert data == "toto"
-            event_cb_called[event_name] = True
-        return test_event_cb_
-    
-    for event_name in ("event1", "event2"):
-        libafb.evthandler(binder, {"pattern": f"from_mqtt/event/{event_name}", "callback": test_event_cb(event_name)}, None)
-        event_cb_called[event_name] = False
-
-        mqtt_p.send(
-            ("publish", {"id": "myid", "type": "update", "name": event_name, "data": "toto"})
+    def test_from_mqtt(self):
+        # Test "from_mqtt"
+        # 1. we simulate a request from MQTT
+        # 2. the extension will translate it to a verb call on the "test" api
+        # 3. the test verb is implemented here and always return {"toto": 42} as data
+        # 4. the extension send an MQTT message back to the caller
+        self.mqtt_p.send(
+            (
+                "publish",
+                {"id": "myid", "type": "request", "name": "test", "data": "toto"},
+            )
         )
-        for _ in range(3):
-            if event_cb_called[event_name]:
-                break
-            time.sleep(0.5)
-        assert event_cb_called[event_name]
+        cmd, data = self.mqtt_p.recv()
+        assert cmd == "received"
+        assert data == {"toto": 42}
 
-def afb_tests(handler, mqtt_p):
-    test_to_mqtt(mqtt_p)
-    test_to_mqtt_event(mqtt_p)
-    test_from_mqtt(mqtt_p)
-    test_from_mqtt_events(mqtt_p)    
+    def test_from_mqtt_events(self):
+        # Test the "event" mode
+        raised = False
+        try:
+            libafb.callsync(binder, "from_mqtt", "subscribe")
+        except RuntimeError as e:
+            assert e.args[0] == "invalid-request"
+            raised = True
+        assert raised
 
-    mqtt_p.send(("end",))
+        for wrong_arg in (None, 42, "string", {"ok": 42}):
+            raised = False
+            try:
+                libafb.callsync(binder, "from_mqtt", "subscribe", wrong_arg)
+            except RuntimeError as e:
+                assert e.args[0] == "invalid-request"
+                raised = True
+            assert raised
 
-    return 1
+        r = libafb.callsync(binder, "from_mqtt", "subscribe", ["event1", "event2"])
+        assert r.status == 0
+
+        event_cb_called = {}
+
+        def test_event_cb(event_name: str):
+            def test_event_cb_(handler, afb_event_name, userdata, data):
+                nonlocal event_cb_called
+                assert afb_event_name == f"from_mqtt/event/{event_name}"
+                assert data == "toto"
+                event_cb_called[event_name] = True
+
+            return test_event_cb_
+
+        for event_name in ("event1", "event2"):
+            libafb.evthandler(
+                binder,
+                {
+                    "pattern": f"from_mqtt/event/{event_name}",
+                    "callback": test_event_cb(event_name),
+                },
+                None,
+            )
+            event_cb_called[event_name] = False
+
+            self.mqtt_p.send(
+                (
+                    "publish",
+                    {
+                        "id": "myid",
+                        "type": "update",
+                        "name": event_name,
+                        "data": "toto",
+                    },
+                )
+            )
+            for _ in range(3):
+                if event_cb_called[event_name]:
+                    break
+                time.sleep(0.5)
+            assert event_cb_called[event_name]
 
 
-main()
+if __name__ == "__main__":
+    main()
