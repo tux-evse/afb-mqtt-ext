@@ -1,0 +1,15 @@
+publish-topic: out_topic
+to-mqtt:
+  event:
+    registrations:
+      # verbs to call to subscribe to events
+      - api: test
+        verb: subscribe
+        args:
+          action: subscribe
+    template:
+      id: ${uuid()}
+      name: ${event_name}
+      type: update
+      data: ${data}
+

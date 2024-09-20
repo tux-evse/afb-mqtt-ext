@@ -1,0 +1,20 @@
+broker-host: localhost
+broker-port: 1883
+mapping-type: topic-pair
+publish-topic: out_topic
+subscribe-topic: in_topic
+to-mqtt:
+  timeout-ms: 1000
+  request-template:
+    id: ${uuid()}
+    name: ${verb}
+    type: request
+    data: ${data}
+  response-extraction:
+    filter:
+      path: .type
+      value: response
+    data-path: .data
+    correlation-path: .id
+  request-correlation-path: .id
+  

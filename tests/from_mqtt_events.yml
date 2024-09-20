@@ -1,0 +1,14 @@
+subscribe-topic: in_topic
+
+from-mqtt:
+  # the AFB API to call on requests
+  api: test
+
+  # this will emit an event
+  event-extraction:
+    event-name-path: .name
+    data-path: .data
+    filter:
+      path: .type
+      value: update
+

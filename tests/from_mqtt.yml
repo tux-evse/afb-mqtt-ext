@@ -1,0 +1,20 @@
+publish-topic: out_topic
+subscribe-topic: in_topic
+
+from-mqtt:
+  # the AFB API to call on requests
+  api: test
+  request-extraction:
+    verb-path: .name
+    data-path: .data
+    filter:
+      path: .type
+      value: request
+
+  response-template:
+    id: ${request.id}
+    name: ${verb}
+    type: response
+    data: ${data}
+
+

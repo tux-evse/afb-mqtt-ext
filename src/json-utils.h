@@ -17,7 +17,7 @@
  * made of object keys separated by a dot (".").
  *
  * e.g ".child1.child2" will return the part of the JSON object that is
- * stored as value of the key "child2" of the object stored as vlaue of
+ * stored as value of the key "child2" of the object stored as value of
  * the key "child1" of the JSON object.
  *
  * NULL is returned if the path is invalid or not found
