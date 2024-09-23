@@ -42,7 +42,7 @@ AFB_EXTENSION("MQTT")
 
 #define TIMEOUT_ERROR 1
 
-char default_mqtt_broker_host[] = "localhost";
+const char default_mqtt_broker_host[] = "localhost";
 const int default_mqtt_broker_port = 1883;
 const int default_mqtt_timeout_ms = 60000;
 
@@ -52,10 +52,10 @@ const int default_mqtt_timeout_ms = 60000;
 struct message_extractor_t
 {
     // JSON path to data
-    char *data_path;
+    const char *data_path;
 
     // JSON path to verb / event name
-    char *verb_path;
+    const char *verb_path;
 
     // Optional JSON path filter
     struct json_path_filter_t *filter;
@@ -66,7 +66,7 @@ struct message_extractor_t *message_extractor_new()
     return calloc(1, sizeof(struct message_extractor_t));
 }
 
-void message_extractor_delete(struct message_extractor_t *self)
+void message_extractor_destroy(struct message_extractor_t *self)
 {
     if (self->filter) {
         json_path_filter_delete(self->filter);
@@ -102,10 +102,10 @@ struct to_mqtt_t
     int timeout_ms;
 
     json_object *request_template;
-    char *request_correlation_path;
+    const char *request_correlation_path;
 
     struct message_extractor_t response_extractor;
-    char *response_correlation_path;
+    const char *response_correlation_path;
 
     /**
      * Very simple store of requests.
@@ -133,7 +133,7 @@ void to_mqtt_delete(struct to_mqtt_t *self)
 {
     if (self->request_template)
         json_object_put(self->request_template);
-    message_extractor_delete(&self->response_extractor);
+    message_extractor_destroy(&self->response_extractor);
     if (self->on_event_template)
         json_object_put(self->on_event_template);
     if (self->event_registrations)
@@ -236,7 +236,7 @@ void to_mqtt_delete_stored_request(struct to_mqtt_t *self, size_t index)
 struct from_mqtt_t
 {
     // AFB API to call a verb on when we receive a request/event on MQTT
-    char *api_name;
+    const char *api_name;
 
     struct message_extractor_t *request_extractor;
     json_object *response_template;
@@ -263,11 +263,11 @@ void from_mqtt_delete(struct from_mqtt_t *self)
         json_object_put(self->response_template);
 
     if (self->request_extractor) {
-        message_extractor_delete(self->request_extractor);
+        message_extractor_destroy(self->request_extractor);
         free(self->request_extractor);
     }
     if (self->event_extractor) {
-        message_extractor_delete(self->event_extractor);
+        message_extractor_destroy(self->event_extractor);
         free(self->event_extractor);
     }
 
@@ -312,10 +312,10 @@ struct mqtt_ext_handler_t
 {
     json_object *config_json;
     struct mosquitto *mosq;
-    char *broker_host;
+    const char *broker_host;
     int broker_port;
-    char *subscribe_topic;
-    char *publish_topic;
+    const char *subscribe_topic;
+    const char *publish_topic;
     struct to_mqtt_t *to_mqtt;
     struct from_mqtt_t *from_mqtt;
     struct afb_apiset *call_set;
@@ -333,7 +333,7 @@ void mqtt_ext_handler_init(struct mqtt_ext_handler_t *self)
     self->broker_port = default_mqtt_broker_port;
 }
 
-void mqtt_ext_handler_delete(struct mqtt_ext_handler_t *self)
+void mqtt_ext_handler_destroy(struct mqtt_ext_handler_t *self)
 {
     if (self->mosq)
         mosquitto_destroy(self->mosq);
@@ -892,7 +892,6 @@ int parse_config(json_object *config)
                 return -1;
             }
 
-
             if (filter_json)
                 g_handler.from_mqtt->request_extractor->filter =
                     json_path_filter_from_json_config(filter_json);
@@ -971,7 +970,6 @@ void internal_mosquitto_loop(struct ev_fd *efd, int fd, uint32_t revents, void *
 {
     struct mosquitto *mosq = closure;
 
-
     mosquitto_loop_read(mosq, /* UNUSED */ 1);
     if (mosquitto_want_write(mosq)) {
         mosquitto_loop_write(mosq, /* UNUSED */ 1);
@@ -1048,7 +1046,7 @@ int AfbExtensionExitV1(void *data, struct afb_apiset *declare_set)
 #endif
     afb_evt_listener_unref(g_listener);
 
-    mqtt_ext_handler_delete(&g_handler);
+    mqtt_ext_handler_destroy(&g_handler);
 
     return 0;
 }

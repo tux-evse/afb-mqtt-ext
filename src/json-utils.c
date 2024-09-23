@@ -145,6 +145,7 @@ void json_path_filter_delete(struct json_path_filter_t *self)
         free(self->path);
     if (self->expected_value)
         json_object_put(self->expected_value);
+    free(self);
 }
 
 bool json_path_filter_does_apply(struct json_path_filter_t *self, json_object *obj)
