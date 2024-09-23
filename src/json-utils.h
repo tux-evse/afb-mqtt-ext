@@ -64,7 +64,7 @@ json_object *json_object_get_path(json_object *obj, const char *path);
  */
 json_object *json_object_fill_template(json_object *obj, json_object *mapping);
 
-struct template_function_t
+struct template_function
 {
     char *function_name;
     json_object *(*generator)();
@@ -93,14 +93,14 @@ struct template_function_t
  * */
 json_object *json_object_fill_template_with_functions(json_object *obj,
                                                       json_object *mapping,
-                                                      struct template_function_t *functions);
+                                                      struct template_function *functions);
 
-struct json_path_filter_t;
+struct json_path_filter;
 
-struct json_path_filter_t *json_path_filter_new(char *path, json_object *expected_value);
+struct json_path_filter *json_path_filter_new(char *path, json_object *expected_value);
 
-struct json_path_filter_t *json_path_filter_from_json_config(json_object *json_config);
+struct json_path_filter *json_path_filter_from_json_config(json_object *json_config);
 
-bool json_path_filter_does_apply(struct json_path_filter_t *self, json_object *obj);
+bool json_path_filter_does_apply(struct json_path_filter *self, json_object *obj);
 
-void json_path_filter_delete(struct json_path_filter_t *self);
+void json_path_filter_delete(struct json_path_filter *self);

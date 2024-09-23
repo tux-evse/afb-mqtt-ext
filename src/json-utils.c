@@ -44,10 +44,10 @@ json_object *json_object_get_path(json_object *obj, const char *path)
     }
 }
 
-struct template_function_t *template_functions_find(struct template_function_t *functions,
-                                                    char *function_name)
+struct template_function *template_functions_find(struct template_function *functions,
+                                                  char *function_name)
 {
-    struct template_function_t *p = functions;
+    struct template_function *p = functions;
     while (p->function_name && strcmp(p->function_name, function_name))
         p++;
     return p->function_name ? p : NULL;
@@ -55,7 +55,7 @@ struct template_function_t *template_functions_find(struct template_function_t *
 
 json_object *json_object_fill_template_with_functions(json_object *jso,
                                                       json_object *mapping,
-                                                      struct template_function_t *functions)
+                                                      struct template_function *functions)
 {
     switch (json_object_get_type(jso)) {
     case json_type_array: {
@@ -102,7 +102,7 @@ json_object *json_object_fill_template_with_functions(json_object *jso,
                 char function_name[function_call - tag + 1];
                 strncpy(function_name, tag, function_call - tag);
                 function_name[function_call - tag] = 0;
-                struct template_function_t *function =
+                struct template_function *function =
                     template_functions_find(functions, function_name);
                 if (function) {
                     return function->generator();
@@ -125,21 +125,21 @@ json_object *json_object_fill_template(json_object *jso, json_object *mapping)
     return json_object_fill_template_with_functions(jso, mapping, NULL);
 }
 
-struct json_path_filter_t
+struct json_path_filter
 {
     char *path;
     json_object *expected_value;
 };
 
-struct json_path_filter_t *json_path_filter_new(char *path, json_object *expected_value)
+struct json_path_filter *json_path_filter_new(char *path, json_object *expected_value)
 {
-    struct json_path_filter_t *filter = calloc(1, sizeof(struct json_path_filter_t));
+    struct json_path_filter *filter = calloc(1, sizeof(struct json_path_filter));
     filter->path = strdup(path);
     filter->expected_value = json_object_get(expected_value);
     return filter;
 }
 
-void json_path_filter_delete(struct json_path_filter_t *self)
+void json_path_filter_delete(struct json_path_filter *self)
 {
     if (self->path)
         free(self->path);
@@ -148,7 +148,7 @@ void json_path_filter_delete(struct json_path_filter_t *self)
     free(self);
 }
 
-bool json_path_filter_does_apply(struct json_path_filter_t *self, json_object *obj)
+bool json_path_filter_does_apply(struct json_path_filter *self, json_object *obj)
 {
     json_object *sub = json_object_get_path(obj, self->path);
     if (!sub)
@@ -160,7 +160,7 @@ bool json_path_filter_does_apply(struct json_path_filter_t *self, json_object *o
     return !strcmp(value_str, expected_value_str);
 }
 
-struct json_path_filter_t *json_path_filter_from_json_config(json_object *json_config)
+struct json_path_filter *json_path_filter_from_json_config(json_object *json_config)
 {
     char *path = NULL;
     json_object *value = NULL, *json_item = NULL;
