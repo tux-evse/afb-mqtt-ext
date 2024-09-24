@@ -506,13 +506,25 @@ static void on_mqtt_message(struct mosquitto *mosq,
     if (g_handler.from_mqtt && from_mqtt_is_request(g_handler.from_mqtt, mqtt_json)) {
         json_object *verb =
             json_object_get_path(mqtt_json, g_handler.from_mqtt->request_extractor->verb_path);
-        const char *verb_str = verb ? json_object_get_string(verb) : NULL;
+        if (!verb) {
+            json_object_put(mqtt_json);
+            LIBAFB_NOTICE("Cannot extract verb name from message through path '%s'",
+                          g_handler.from_mqtt->request_extractor->verb_path);
+            return;
+        }
+        const char *verb_str = json_object_get_string(verb);
         json_object *data =
             json_object_get_path(mqtt_json, g_handler.from_mqtt->request_extractor->data_path);
-        data = data ? json_object_get(data) : json_object_new_null();
+        if (!data) {
+            json_object_put(mqtt_json);
+            LIBAFB_NOTICE("Cannot extract data from message through path '%s'",
+                          g_handler.from_mqtt->request_extractor->data_path);
+            return;
+        }
+        data = json_object_get(data);
 
         struct my_req *my_req = malloc(sizeof(struct my_req));
-        my_req->request_json = json_object_get(mqtt_json);
+        my_req->request_json = mqtt_json;
 
         struct afb_data *reply;
         afb_data_create_raw(&reply, &afb_type_predefined_json_c, data, 0, (void *)json_object_put,
@@ -520,16 +532,27 @@ static void on_mqtt_message(struct mosquitto *mosq,
         afb_req_common_init(&my_req->req, /* afb_req_common_query_itf = */ &verb_call_itf,
                             g_handler.from_mqtt->api_name, verb_str, 1, &reply, NULL);
         afb_req_common_process(&my_req->req, g_handler.call_set);
-
-        json_object_put(mqtt_json);
     }
     else if (g_handler.from_mqtt && from_mqtt_is_event(g_handler.from_mqtt, mqtt_json)) {
         json_object *event =
             json_object_get_path(mqtt_json, g_handler.from_mqtt->event_extractor->verb_path);
-        const char *event_name = event ? json_object_get_string(event) : NULL;
+        if (!event) {
+            json_object_put(mqtt_json);
+            LIBAFB_NOTICE("Cannot extract event name from message through path '%s'",
+                          g_handler.from_mqtt->event_extractor->verb_path);
+            return;
+        }
+
+        const char *event_name = json_object_get_string(event);
         json_object *data =
             json_object_get_path(mqtt_json, g_handler.from_mqtt->event_extractor->data_path);
-        data = data ? json_object_get(data) : json_object_new_null();
+        if (!data) {
+            json_object_put(mqtt_json);
+            LIBAFB_NOTICE("Cannot extract data from message through path '%s'",
+                          g_handler.from_mqtt->event_extractor->data_path);
+            return;
+        }
+        data = json_object_get(data);
 
         struct afb_data *event_data[2];
 
@@ -578,12 +601,9 @@ static void on_mqtt_message(struct mosquitto *mosq,
         afb_sched_abort_job(stored_request->timeout_job_id);
 
         // extract useful data from response
-        json_object *response_json = mqtt_json;
-        if (g_handler.to_mqtt->response_extractor.data_path) {
-            response_json =
-                json_object_get_path(mqtt_json, g_handler.to_mqtt->response_extractor.data_path);
-            response_json = response_json ? json_object_get(response_json) : json_object_new_null();
-        }
+        json_object *response_json =
+            json_object_get_path(mqtt_json, g_handler.to_mqtt->response_extractor.data_path);
+        response_json = response_json ? json_object_get(response_json) : json_object_new_null();
 
         // craft a reply and reply
         struct afb_data *reply;
@@ -741,8 +761,14 @@ struct afb_evt_listener *g_listener;
 static void on_event_pushed(void *closure, const struct afb_evt_pushed *event)
 {
     LIBAFB_DEBUG("Received event %s", afb_evt_fullname(event->evt));
-    // TODO error if not json_c type
-    json_object *data = afb_data_ro_pointer(event->data.params[0]);
+
+    struct afb_data *afb_arg = NULL;
+    int rc = afb_data_convert(event->data.params[0], &afb_type_predefined_json_c, &afb_arg);
+    if (rc < 0) {
+        LIBAFB_NOTICE("Cannot convert data to JSON: error code %d", rc);
+        return;
+    }
+    json_object *data = afb_data_ro_pointer(afb_arg);
 
     json_object *mapping = json_object_new_object();
     json_object_object_add(mapping, "event_name", json_object_new_string(afb_evt_name(event->evt)));
