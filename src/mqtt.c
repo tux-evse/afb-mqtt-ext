@@ -455,9 +455,12 @@ static void on_verb_call_reply(struct afb_req_common *req,
     json_object *filled =
         json_object_fill_template(g_handler.from_mqtt->response_template, mapping);
     json_object_put(mapping);
-    const char *filled_str = json_object_get_string(filled);
 
-    mosquitto_publish(g_handler.mosq, /* mid = */ NULL, g_handler.publish_topic, strlen(filled_str),
+    size_t filled_len;
+    const char *filled_str =
+        json_object_to_json_string_length(filled, JSON_C_TO_STRING_PLAIN, &filled_len);
+
+    mosquitto_publish(g_handler.mosq, /* mid = */ NULL, g_handler.publish_topic, filled_len,
                       filled_str,
                       /* qos = */ 0, /* retain = */ false);
 
@@ -536,14 +539,13 @@ static void on_mqtt_message(struct mosquitto *mosq,
     else if (g_handler.from_mqtt && from_mqtt_is_event(g_handler.from_mqtt, mqtt_json)) {
         json_object *event =
             json_object_get_path(mqtt_json, g_handler.from_mqtt->event_extractor->verb_path);
-        if (!event) {
+        if (!event || !json_object_is_type(event, json_type_string)) {
             json_object_put(mqtt_json);
             LIBAFB_NOTICE("Cannot extract event name from message through path '%s'",
                           g_handler.from_mqtt->event_extractor->verb_path);
             return;
         }
 
-        const char *event_name = json_object_get_string(event);
         json_object *data =
             json_object_get_path(mqtt_json, g_handler.from_mqtt->event_extractor->data_path);
         if (!data) {
@@ -556,8 +558,11 @@ static void on_mqtt_message(struct mosquitto *mosq,
 
         struct afb_data *event_data[2];
 
+        const char *event_name = json_object_get_string(event);
+        size_t event_name_len = json_object_get_string_len(event);
+
         afb_data_create_copy(&event_data[0], &afb_type_predefined_stringz, event_name,
-                             strlen(event_name) + 1);
+                             event_name_len + 1);
         afb_data_create_raw(&event_data[1], &afb_type_predefined_json_c, data, 0,
                             (void *)json_object_put, data);
 
@@ -577,7 +582,7 @@ static void on_mqtt_message(struct mosquitto *mosq,
             found_event = calloc(1, sizeof(struct registered_event));
             found_event->evt = evt;
             found_event->name = afb_evt_fullname(evt);
-            HASH_ADD_KEYPTR(hh, registered_events, event_name, strlen(event_name), found_event);
+            HASH_ADD_KEYPTR(hh, registered_events, event_name, event_name_len, found_event);
         }
 
         if (evt) {
@@ -660,12 +665,14 @@ static void on_to_mqtt_request(void *closure, struct afb_req_common *req)
 
         json_object *filled = json_object_fill_template_with_functions(
             g_handler.to_mqtt->request_template, mapping, id_functions);
-        const char *request_str = json_object_get_string(filled);
+        size_t filled_len;
+        const char *filled_str =
+            json_object_to_json_string_length(filled, JSON_C_TO_STRING_PLAIN, &filled_len);
 
-        LIBAFB_DEBUG("Publish on %s: %s", g_handler.publish_topic, request_str);
+        LIBAFB_DEBUG("Publish on %s: %s", g_handler.publish_topic, filled_str);
 
-        mosquitto_publish(g_handler.mosq, /* mid = */ NULL, g_handler.publish_topic,
-                          strlen(request_str), request_str,
+        mosquitto_publish(g_handler.mosq, /* mid = */ NULL, g_handler.publish_topic, filled_len,
+                          filled_str,
                           /* qos = */ 0, /* retain = */ false);
 
         req = afb_req_common_addref(req);
@@ -726,7 +733,9 @@ static void on_from_mqtt_api_call(void *closure, struct afb_req_common *req)
 
         size_t n = json_object_array_length(param);
         for (size_t i = 0; i < n; i++) {
-            const char *event_name = json_object_get_string(json_object_array_get_idx(param, i));
+            json_object *array_item = json_object_array_get_idx(param, i);
+            size_t event_name_len = json_object_get_string_len(array_item);
+            const char *event_name = json_object_get_string(array_item);
             struct registered_event *found_event = NULL;
 
             HASH_FIND_STR(g_handler.from_mqtt->registered_events, event_name, found_event);
@@ -738,7 +747,7 @@ static void on_from_mqtt_api_call(void *closure, struct afb_req_common *req)
                 found_event->name = event_name;
                 found_event->evt = evt;
                 HASH_ADD_KEYPTR(hh, g_handler.from_mqtt->registered_events, event_name,
-                                strlen(event_name), found_event);
+                                event_name_len, found_event);
             }
             afb_req_common_subscribe(req, found_event->evt);
         }
@@ -776,9 +785,12 @@ static void on_event_pushed(void *closure, const struct afb_evt_pushed *event)
     json_object *filled = json_object_fill_template_with_functions(
         g_handler.to_mqtt->on_event_template, mapping, id_functions);
     json_object_put(mapping);
-    char *filled_str = (char *)json_object_get_string(filled);
 
-    mosquitto_publish(g_handler.mosq, /* mid = */ NULL, g_handler.publish_topic, strlen(filled_str),
+    size_t filled_len;
+    const char *filled_str =
+        json_object_to_json_string_length(filled, JSON_C_TO_STRING_PLAIN, &filled_len);
+
+    mosquitto_publish(g_handler.mosq, /* mid = */ NULL, g_handler.publish_topic, filled_len,
                       filled_str,
                       /* qos = */ 0, /* retain = */ false);
 
