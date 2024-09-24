@@ -3,7 +3,8 @@ import json
 import time
 import signal
 import sys
-import multiprocessing as mp
+import threading
+import queue
 
 import libafb
 
@@ -13,7 +14,14 @@ import paho.mqtt.client as mqtt
 OUT_TOPIC = "out_topic"
 IN_TOPIC = "in_topic"
 
+# MQTT client
 mqttc = None
+
+# MQTT thread state
+mqtt_state = None
+
+# MQTT message queue
+mqtt_recv_queue = queue.Queue()
 
 test_verb_called = None
 
@@ -41,53 +49,53 @@ def control_cb(api, state):
 
 
 def on_mqtt_connect(client, userdata, flags, reason_code, properties):
+    global mqtt_state
     print(f"Connected with result code {reason_code}")
     client.subscribe(OUT_TOPIC)
-    pipe = userdata
-    pipe.send(("ready",))
+    mqtt_state = "ready"
 
 
 def mqtt_publish(data: dict):
     return mqttc.publish(IN_TOPIC, json.dumps(data).encode("utf-8"))
 
 
+mqtt_received = None
+
+
 def on_mqtt_message(client, userdata, msg):
-    mqtt_p = userdata
+    global mqtt_recv_queue
     payload = json.loads(msg.payload.decode("utf-8"))
     name = payload.get("name")
     type = payload.get("type")
     id = payload.get("id")
     data = payload.get("data")
 
+    print("==MQTT msg", payload)
+
     if name == "echo" and type == "request" and msg.topic == OUT_TOPIC:
         mqtt_publish({"id": id, "type": "response", "name": name, "data": data})
     elif name == "test" and type == "response" and msg.topic == OUT_TOPIC:
-        mqtt_p.send(("received", data))
+        mqtt_recv_queue.put(data)
     elif type == "update" and msg.topic == OUT_TOPIC:
-        mqtt_p.send(("received", data))
+        mqtt_recv_queue.put(data)
 
 
-def mqtt_main(pipe):
+def mqtt_main():
     global mqttc
+    global mqtt_state
     mqttc = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-    mqttc.user_data_set(pipe)
     mqttc.on_message = on_mqtt_message
     mqttc.on_connect = on_mqtt_connect
 
     mqttc.connect("localhost", 1883, 60)
 
-    while True:
-        if pipe.poll():
-            command, *args = pipe.recv()
-            if command == "publish":
-                mqtt_publish(args[0])
-            elif command == "end":
-                break
+    while mqtt_state != "stop":
         mqttc.loop(0.5)
 
 
 def main():
     global binder
+    global mqtt_state
 
     if len(sys.argv) < 2:
         print("Argument: config_file_path.yaml [test1] [test2] ...")
@@ -135,37 +143,33 @@ def main():
         }
     )
 
-    mqtt_p, mqtt_child = mp.Pipe()
+    mqtt_thread = threading.Thread(target=mqtt_main)
 
-    mqtt_process = mp.Process(target=mqtt_main, args=(mqtt_child,))
-
-    def run_tests(handle, mqtt_p):
-        t = Tests(mqtt_p)
+    def run_tests(handle, _):
+        t = Tests()
         return t.run(tests)
 
     try:
-        signal.signal(signal.SIGINT, signal.default_int_handler)
-        mqtt_process.start()
-        msg, *args = mqtt_p.recv()
-        if msg != "ready":
-            raise RuntimeError()
+        mqtt_thread.start()
 
-        r = libafb.loopstart(binder, run_tests, mqtt_p)
+        while mqtt_state != "ready":
+            time.sleep(0.1)
 
-        mqtt_p.send(("end",))
+        r = libafb.loopstart(binder, run_tests, None)
 
-        mqtt_process.join()
+        mqtt_state = "stop"
+
+        mqtt_thread.join()
 
         sys.exit(0 if r == 1 else r)
 
     except KeyboardInterrupt:
-        mqtt_process.terminate()
+        mqtt_thread.terminate()
 
 
 class Tests:
-    def __init__(self, mqtt_p):
+    def __init__(self):
         global binder
-        self.mqtt_p = mqtt_p
         self.binder = binder
 
     def run(self, expected_tests=None):
@@ -184,7 +188,7 @@ class Tests:
             except Exception as e:
                 print("******** Exception", e.__class__.__name__)
                 return -1
-            
+
         # no error
         return 1
 
@@ -214,9 +218,7 @@ class Tests:
         libafb.evtpush(my_event, "hello")
 
         # check that the mqtt message has been sent
-        cmd, data = self.mqtt_p.recv()
-        assert cmd == "received"
-        assert data == "hello"
+        assert mqtt_recv_queue.get(block=True, timeout=2.0) == "hello"
 
     def test_from_mqtt(self):
         # Test "from_mqtt"
@@ -224,15 +226,9 @@ class Tests:
         # 2. the extension will translate it to a verb call on the "test" api
         # 3. the test verb is implemented here and always return {"toto": 42} as data
         # 4. the extension send an MQTT message back to the caller
-        self.mqtt_p.send(
-            (
-                "publish",
-                {"id": "myid", "type": "request", "name": "test", "data": "toto"},
-            )
-        )
-        cmd, data = self.mqtt_p.recv()
-        assert cmd == "received"
-        assert data == {"toto": 42}
+        mqtt_publish({"id": "myid", "type": "request", "name": "test", "data": "toto"})
+
+        assert mqtt_recv_queue.get(block=True, timeout=2.0) == {"toto": 42}
 
     def test_from_mqtt_events(self):
         # Test the "event" mode
@@ -253,7 +249,9 @@ class Tests:
                 raised = True
             assert raised
 
-        r = libafb.callsync(self.binder, "from_mqtt", "subscribe_events", ["event1", "event2"])
+        r = libafb.callsync(
+            self.binder, "from_mqtt", "subscribe_events", ["event1", "event2"]
+        )
         assert r.status == 0
 
         event_cb_called = {}
@@ -278,17 +276,15 @@ class Tests:
             )
             event_cb_called[event_name] = False
 
-            self.mqtt_p.send(
-                (
-                    "publish",
-                    {
-                        "id": "myid",
-                        "type": "update",
-                        "name": event_name,
-                        "data": "toto",
-                    },
-                )
+            mqtt_publish(
+                {
+                    "id": "myid",
+                    "type": "update",
+                    "name": event_name,
+                    "data": "toto",
+                },
             )
+
             for _ in range(5):
                 if event_cb_called[event_name]:
                     break
@@ -327,22 +323,20 @@ class Tests:
             )
             event_cb_called[event_name] = False
 
-            self.mqtt_p.send(
-                (
-                    "publish",
-                    {
-                        "id": "myid",
-                        "type": "update",
-                        "name": event_name,
-                        "data": "toto",
-                    },
-                )
+            mqtt_publish(
+                {
+                    "id": "myid",
+                    "type": "update",
+                    "name": event_name,
+                    "data": "toto",
+                },
             )
+
             for _ in range(5):
                 if event_cb_called[event_name]:
                     break
                 time.sleep(0.5)
-            assert event_cb_called[event_name]            
+            assert event_cb_called[event_name]
 
 
 if __name__ == "__main__":

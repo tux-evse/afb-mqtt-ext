@@ -1069,7 +1069,9 @@ int AfbExtensionHTTPV1(void *data, struct afb_hsrv *hsrv)
     return 0;
 }
 
-#if 0
+#define USE_MOSQUITTO_THREAD 1
+
+#if !USE_MOSQUITTO_THREAD
 static void internal_mosquitto_loop(struct ev_fd *efd, int fd, uint32_t revents, void *closure)
 {
     struct mosquitto *mosq = closure;
@@ -1116,7 +1118,7 @@ int AfbExtensionServeV1(void *data, struct afb_apiset *call_set)
 
     mosquitto_message_callback_set(mosq, on_mqtt_message);
 
-#if 0
+#if !USE_MOSQUITTO_THREAD
     // FIXME: does not always work. Sometimes internal_mosquitto_loop is never called
 
     // Instead of mosquitto_loop_start() that would start a new thread,
@@ -1146,7 +1148,7 @@ int AfbExtensionExitV1(void *data, struct afb_apiset *declare_set)
 {
     LIBAFB_NOTICE("Extension %s got to exit", AfbExtensionManifest.name);
 
-#if 0
+#if !USE_MOSQUITTO_THREAD
     afb_ev_mgr_prepare_wait_dispatch_release(1000);
 #endif
     afb_evt_listener_unref(g_listener);
