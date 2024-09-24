@@ -878,8 +878,8 @@ static int parse_config(json_object *config)
 
     json_object *config_file_json = NULL;
     int rc = rp_yaml_file_to_json_c(&config_file_json, fp, config_file_path);
+    fclose(fp);
     if (rc < 0) {
-        fclose(fp);
         MQTT_EXT_ERROR("Error parsing YAML configuration file");
         return -1;
     }
