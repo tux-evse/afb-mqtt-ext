@@ -182,7 +182,7 @@ class Tests:
             try:
                 foo()
             except Exception as e:
-                print("******** Exception", e)
+                print("******** Exception", e.__class__.__name__)
                 return -1
             
         # no error
@@ -238,7 +238,7 @@ class Tests:
         # Test the "event" mode
         raised = False
         try:
-            libafb.callsync(self.binder, "from_mqtt", "subscribe")
+            libafb.callsync(self.binder, "from_mqtt", "subscribe_events")
         except RuntimeError as e:
             assert e.args[0] == "invalid-request"
             raised = True
@@ -247,13 +247,13 @@ class Tests:
         for wrong_arg in (None, 42, "string", {"ok": 42}):
             raised = False
             try:
-                libafb.callsync(self.binder, "from_mqtt", "subscribe", wrong_arg)
+                libafb.callsync(self.binder, "from_mqtt", "subscribe_events", wrong_arg)
             except RuntimeError as e:
                 assert e.args[0] == "invalid-request"
                 raised = True
             assert raised
 
-        r = libafb.callsync(self.binder, "from_mqtt", "subscribe", ["event1", "event2"])
+        r = libafb.callsync(self.binder, "from_mqtt", "subscribe_events", ["event1", "event2"])
         assert r.status == 0
 
         event_cb_called = {}
@@ -289,11 +289,60 @@ class Tests:
                     },
                 )
             )
-            for _ in range(3):
+            for _ in range(5):
                 if event_cb_called[event_name]:
                     break
                 time.sleep(0.5)
             assert event_cb_called[event_name]
+
+    def test_from_mqtt_events_bcast(self):
+        # Test the "event" mode in broadcast
+        raised = False
+        try:
+            libafb.callsync(self.binder, "from_mqtt", "subscribe_events")
+        except RuntimeError as e:
+            assert e.args[0] == "unknown-verb"
+            raised = True
+        assert raised
+
+        event_cb_called = {}
+
+        def test_event_cb(event_name: str):
+            def test_event_cb_(handler, afb_event_name, userdata, data):
+                nonlocal event_cb_called
+                assert afb_event_name == f"from_mqtt/event/{event_name}"
+                assert data == "toto"
+                event_cb_called[event_name] = True
+
+            return test_event_cb_
+
+        for event_name in ("event1", "event2"):
+            libafb.evthandler(
+                self.binder,
+                {
+                    "pattern": f"from_mqtt/event/{event_name}",
+                    "callback": test_event_cb(event_name),
+                },
+                None,
+            )
+            event_cb_called[event_name] = False
+
+            self.mqtt_p.send(
+                (
+                    "publish",
+                    {
+                        "id": "myid",
+                        "type": "update",
+                        "name": event_name,
+                        "data": "toto",
+                    },
+                )
+            )
+            for _ in range(5):
+                if event_cb_called[event_name]:
+                    break
+                time.sleep(0.5)
+            assert event_cb_called[event_name]            
 
 
 if __name__ == "__main__":

@@ -44,7 +44,7 @@ This key allows one to specify the TCP port of the MQTT broker
 
 This key allows one to specify which mapping between AFB and MQTT is done.
 
-The only only supported so far is `topic-pair`. With this type of mapping, all requests are sent on a given MQTT topic and all responses are also expected on a specific MQTT topic. The correlation between requests and responses are made by extracting data from JSON messages.
+The only type supported so far is `topic-pair`. With this type of mapping, all requests are sent on a given MQTT topic and all responses are also expected on a specific MQTT topic. The correlation between requests and responses are made by extracting data from JSON messages.
 
 *Default value*: `topic-pair`
 
@@ -207,10 +207,15 @@ This setting key is the [JSON template](#json_template) used to craft an MQTT re
 
 The extension is able to emit an event to clients each time a certain MQTT pattern of messages is received.
 
-This requires clients to first subscribe to such events.
-For that purpose, the extension exposes a `from_mqtt` API with the following verbs:
-- **subscribe_all**: the client calling this verb will be subscribed to all upcoming events from MQTT. The pushed event is named `from_mqtt/event` and contains the event name as its first argument and the data as its second argument
-- **subscribe**: this verb allows clients to subscribe to some choosen upcoming events from MQTT. Names of selected events are supplied as strings in an array as first argument of the verb. Each event is named `from_mqtt/event/{event_name}` and the data of the event are the data of the MQTT event message.
+Two modes of operation are available:
+- either events are sent as broadcast AFB events, in which case all AFB clients receive these events, but it does not require any previous explicit subscription from clients
+- or events are sent to AFB clients which have previously subscribed to them.
+
+The mode of operation can be set by means of the `broadcast-events` boolean configuration key. If it is set to `true`, events will be broadcast and do not require any previous subscription. `broadcast-events` is set to `false` by default.
+
+For event subscriptions, the extension exposes a `from_mqtt` API with the following verbs:
+- **subscribe_all_events**: the client calling this verb will be subscribed to all upcoming events from MQTT. The pushed event is named `from_mqtt/event` and contains the event name as its first argument and the data as its second argument
+- **subscribe_events**: this verb allows clients to subscribe to some choosen upcoming events from MQTT. Names of selected events are supplied as strings in an array as first argument of the verb. Each event is named `from_mqtt/event/{event_name}` and the data of the event are the data of the MQTT event message.
 
 The `event-extraction` configuration contains the following keys:
 - **event-name-part**: [JSON path](#json_path) in the MQTT message to a string used as the event name. **Mandatory**
