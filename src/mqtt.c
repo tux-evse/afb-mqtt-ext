@@ -89,6 +89,9 @@ struct stored_request
     /** The stored request JSON */
     json_object *json_request;
 
+    /** The request correlation data */
+    const char *request_correlation_data;
+
     /** The AFB request so that we are able to reply */
     struct afb_req_common *afb_req;
 
@@ -145,6 +148,7 @@ static void to_mqtt_delete(struct to_mqtt *self)
  *
  * This function looks for an empty slot (in a naive way).
  *
+ * @param self The `to_mqtt` structure to store into
  * @param afb_req The afb request to store
  * @param json The request JSON to store
  * @param timeout_job_id The timeout job id to store
@@ -164,9 +168,19 @@ static int to_mqtt_add_stored_request(struct to_mqtt *self,
         return -1;
     }
 
-    self->stored_requests[i].afb_req = afb_req;
-    self->stored_requests[i].json_request = json;
-    self->stored_requests[i].timeout_job_id = timeout_job_id;
+    struct stored_request *sr = &self->stored_requests[i];
+
+    sr->request_correlation_data = NULL;
+    if (self->request_correlation_path) {
+        json_object *correlation_item = json_object_get_path(json, self->request_correlation_path);
+        if (correlation_item) {
+            sr->request_correlation_data = json_object_get_string(correlation_item);
+        }
+    }
+
+    sr->afb_req = afb_req;
+    sr->json_request = json;
+    sr->timeout_job_id = timeout_job_id;
     return i;
 }
 
@@ -199,15 +213,12 @@ static int to_mqtt_match_reponse(struct to_mqtt *self, json_object *response)
             continue;
 
         // Test correlation data to match the request
-        if (self->request_correlation_path && self->response_correlation_path) {
-            json_object *request_correlation_data =
-                json_object_get_path(sr->json_request, self->request_correlation_path);
+        if (sr->request_correlation_data && self->response_correlation_path) {
             json_object *response_correlation_data =
                 json_object_get_path(response, self->response_correlation_path);
-            if (request_correlation_data && response_correlation_data) {
-                const char *request_cd = json_object_get_string(request_correlation_data);
+            if (response_correlation_data) {
                 const char *response_cd = json_object_get_string(response_correlation_data);
-                if (strcmp(request_cd, response_cd))
+                if (strcmp(sr->request_correlation_data, response_cd))
                     continue;
             }
         }
@@ -643,8 +654,16 @@ static void on_to_mqtt_request(void *closure, struct afb_req_common *req)
             afb_sched_post_job(/* group = */ NULL, /* delayms = */
                                g_handler.to_mqtt->timeout_ms,
                                /* timeout = */ 0, on_response_timeout, req, Afb_Sched_Mode_Normal);
+        if (job_id < 0) {
+            afb_req_common_unref(req);
+            LIBAFB_ERROR("Error calling afb_sched_job: %d", job_id);
+            return;
+        }
 
-        to_mqtt_add_stored_request(g_handler.to_mqtt, req, filled, job_id);
+        if (to_mqtt_add_stored_request(g_handler.to_mqtt, req, filled, job_id) < 0) {
+            afb_req_common_unref(req);
+            return;
+        }
     }
 }
 
