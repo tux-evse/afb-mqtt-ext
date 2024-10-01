@@ -644,6 +644,9 @@ struct template_function id_functions[] = {{.function_name = "uuid", .generator 
  */
 static void on_to_mqtt_request(void *closure, struct afb_req_common *req)
 {
+    if (!strcmp(req->verbname, "info")) {
+        return;
+    }
     LIBAFB_DEBUG("Call to to_mqtt/%s", req->verbname);
     struct afb_data *arg_json = NULL;
     int rc = afb_req_common_param_convert(req, 0, &afb_type_predefined_json_c, &arg_json);
