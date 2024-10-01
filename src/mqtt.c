@@ -305,6 +305,7 @@ static void from_mqtt_delete(struct from_mqtt *self)
         HASH_ITER(hh, self->registered_events, s, tmp)
         {
             HASH_DEL(self->registered_events, s);
+            free((char*)s->name);
             free(s);
         }
     }
@@ -745,6 +746,7 @@ static void on_from_mqtt_api_call(void *closure, struct afb_req_common *req)
             if (!found_event) {
                 // create the event
                 struct afb_evt *evt = NULL;
+                event_name = strdup(event_name);
                 afb_evt_create2(&evt, "from_mqtt/event", event_name);
                 found_event = calloc(1, sizeof(struct registered_event));
                 found_event->name = event_name;
