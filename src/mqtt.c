@@ -305,7 +305,7 @@ static void from_mqtt_delete(struct from_mqtt *self)
         HASH_ITER(hh, self->registered_events, s, tmp)
         {
             HASH_DEL(self->registered_events, s);
-            free((char*)s->name);
+            free((char *)s->name);
             free(s);
         }
     }
@@ -451,8 +451,16 @@ static void on_verb_call_reply(struct afb_req_common *req,
     json_object_object_add(mapping, "request", json_object_get(my_req->request_json));
     json_object_object_add(mapping, "verb", json_object_new_string(req->verbname));
 
-    json_object *reply_data = afb_data_ro_pointer(replies[0]);
-    json_object_object_add(mapping, "data", json_object_get(reply_data));
+    if (nreplies > 0) {
+        struct afb_data *data = NULL;
+        int rc = afb_data_convert(replies[0], &afb_type_predefined_json_c, &data);
+        if (rc < 0) {
+            LIBAFB_WARNING("Cannot convert reply to json");
+            return;
+        }
+        json_object *reply_data = afb_data_ro_pointer(data);
+        json_object_object_add(mapping, "data", json_object_get(reply_data));
+    }
     json_object *filled =
         json_object_fill_template(g_handler.from_mqtt->response_template, mapping);
     json_object_put(mapping);
@@ -536,6 +544,7 @@ static void on_mqtt_message(struct mosquitto *mosq,
         afb_req_common_init(&my_req->req, /* afb_req_common_query_itf = */ &verb_call_itf,
                             g_handler.from_mqtt->api_name, verb_str, 1, &reply, NULL);
         afb_req_common_process(&my_req->req, g_handler.call_set);
+        LIBAFB_DEBUG("Call api/verb %s/%s", g_handler.from_mqtt->api_name, verb_str);
     }
     else if (g_handler.from_mqtt && from_mqtt_is_event(g_handler.from_mqtt, mqtt_json)) {
         json_object *event =
