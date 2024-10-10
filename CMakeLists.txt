@@ -48,3 +48,8 @@ add_library(afb-mqtt-ext SHARED ${SRC})
 target_compile_options(afb-mqtt-ext PUBLIC -Wall)
 
 target_link_libraries(afb-mqtt-ext ${deps_LDFLAGS})
+
+install(TARGETS afb-mqtt-ext
+        LIBRARY
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
