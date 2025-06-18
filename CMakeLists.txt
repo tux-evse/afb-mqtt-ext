@@ -25,7 +25,7 @@ set(CMAKE_INSTALL_SO_NO_EXE 0)
 # ------------------
 set(PROJECT_PRETTY_NAME "MQTT Extension for AFB-binder")
 set(PROJECT_DESCRIPTION "Provide MQTT connectivity")
-set(PROJECT_URL "https://github.com/Tux-EVSE/mqtt-ocpp-ext")
+set(PROJECT_URL "https://github.com/redpesk-common/afb-mqtt-ext")
 set(PROJECT_ICON "icon.jpg")
 set(PROJECT_AUTHOR "Iot-Team")
 set(PROJECT_AUTHOR_MAIL "secretariat@iot.bzh")
@@ -51,5 +51,5 @@ target_link_libraries(afb-mqtt-ext ${deps_LDFLAGS})
 
 install(TARGETS afb-mqtt-ext
         LIBRARY
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/afb-ext
 )
