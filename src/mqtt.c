@@ -351,10 +351,12 @@ struct mqtt_ext_handler
     json_object *config_json;
     struct mosquitto *mosq;
     const char *broker_host;
+    const char *broker_user;
+    const char *broker_pwd;
     int broker_port;
-    // subscribe topics as array of strings
-    json_object *subscribe_topics;
+    const char *subscribe_topic;
     const char *publish_topic;
+    const uint publish_extend;
     struct to_mqtt *to_mqtt;
     struct from_mqtt *from_mqtt;
     struct afb_apiset *call_set;
@@ -381,10 +383,6 @@ static void mqtt_ext_handler_destroy(struct mqtt_ext_handler *self)
         to_mqtt_delete(self->to_mqtt);
     if (self->from_mqtt)
         from_mqtt_delete(self->from_mqtt);
-
-    if (self->subscribe_topics) {
-        json_object_put(self->subscribe_topics);
-    }
 
     json_object_put(self->config_json);
 
@@ -474,9 +472,17 @@ static void on_verb_call_reply(struct afb_req_common *req,
     const char *filled_str =
         json_object_to_json_string_length(filled, JSON_C_TO_STRING_PLAIN, &filled_len);
 
-    mosquitto_publish(g_handler.mosq, /* mid = */ NULL, g_handler.publish_topic, filled_len,
-                      filled_str,
-                      /* qos = */ 0, /* retain = */ false);
+    if (! g_handler.publish_extend) {
+        mosquitto_publish(g_handler.mosq, /* mid = */ NULL, g_handler.publish_topic, filled_len,
+        filled_str,
+        /* qos = */ 0, /* retain = */ false);
+    } else {
+        // extended mode add verb name to mqtt topic
+        char topic[64];
+        snprintf(topic,sizeof(topic),"%s/%s", g_handler.publish_topic, req->verbname);
+        mosquitto_publish(g_handler.mosq, NULL, topic, filled_len, filled_str, 0, false);
+    }
+
 
     json_object_put(filled);
 }
@@ -719,6 +725,13 @@ static struct afb_api_itf to_mqtt_api_itf = {.process = on_to_mqtt_request};
  */
 static void on_from_mqtt_api_call(void *closure, struct afb_req_common *req)
 {
+
+    // Fulup ???
+    if (! g_handler.from_mqtt) {
+        afb_req_common_reply(req, AFB_ERRNO_UNKNOWN_VERB, 0, NULL);
+        return;
+    }
+
     // In broadcast mode, there is no subcription available
     if (g_handler.from_mqtt->broadcast_events) {
         afb_req_common_reply(req, AFB_ERRNO_UNKNOWN_VERB, 0, NULL);
@@ -809,9 +822,16 @@ static void on_event_pushed(void *closure, const struct afb_evt_pushed *event)
     const char *filled_str =
         json_object_to_json_string_length(filled, JSON_C_TO_STRING_PLAIN, &filled_len);
 
-    mosquitto_publish(g_handler.mosq, /* mid = */ NULL, g_handler.publish_topic, filled_len,
-                      filled_str,
-                      /* qos = */ 0, /* retain = */ false);
+    if (! g_handler.publish_extend) {
+        mosquitto_publish(g_handler.mosq, /* mid = */ NULL, g_handler.publish_topic, filled_len,
+        filled_str,
+        /* qos = */ 0, /* retain = */ false);
+    } else {
+        // extended mode add verb name to mqtt topic
+        char topic[64];
+        snprintf(topic,sizeof(topic),"%s/%s", g_handler.publish_topic,afb_evt_name(event->evt));
+        mosquitto_publish(g_handler.mosq, NULL, topic, filled_len, filled_str, 0, false);
+    }
 
     json_object_put(filled);
 }
@@ -880,44 +900,30 @@ static void init_event_registrations()
 
 static int parse_config(json_object *config)
 {
+
     mqtt_ext_handler_init(&g_handler);
 
-    json_object *config_file = NULL;
-    if (!json_object_object_get_ex(config, "mqtt-config-file", &config_file)) {
+    // extract extention config from afb-binder to get env expansion
+    if (!json_object_object_get_ex(config, "config", &g_handler.config_json)) {
         MQTT_EXT_ERROR("No configuration file supplied");
         return -1;
     }
 
-    const char *config_file_path = json_object_get_string(config_file);
-    FILE *fp = fopen(config_file_path, "r");
-    if (!fp) {
-        MQTT_EXT_ERROR("Cannot open configuration file");
-        return -1;
-    }
-
-    json_object *config_file_json = NULL;
-    int rc = rp_yaml_file_to_json_c(&config_file_json, fp, config_file_path);
-    fclose(fp);
-    if (rc < 0) {
-        MQTT_EXT_ERROR("Error parsing YAML configuration file");
-        return -1;
-    }
-
-    // store the config json so that strings can be extracted and
-    // live as long as this object lives
-    g_handler.config_json = config_file_json;
+    // lock config
+    json_object_get(g_handler.config_json);
 
     char *mapping_type = NULL;
     json_object *to_mqtt_json = NULL, *from_mqtt_json = NULL;
 
-    json_object *subscribe_topics = NULL;
-
-    rp_jsonc_unpack(config_file_json, "{s?s s?i s?s s?o s?s s?o s?o}",  //
+    rp_jsonc_unpack(g_handler.config_json, "{s?s s?s s?s s?i s?s s?s s?s s?b s?o s?o}",  //
                     "broker-host", &g_handler.broker_host,              //
+                    "broker-user", &g_handler.broker_user,              //
+                    "broker-pwd", &g_handler.broker_pwd,              //
                     "broker-port", &g_handler.broker_port,              //
                     "mapping-type", &mapping_type,                      //
-                    "subscribe-topic", &subscribe_topics,               //
+                    "subscribe-topic", &g_handler.subscribe_topic,      //
                     "publish-topic", &g_handler.publish_topic,          //
+                    "publish-extend", &g_handler.publish_extend,        //
                     "to-mqtt", &to_mqtt_json,                           //
                     "from-mqtt", &from_mqtt_json                        //
     );
@@ -925,25 +931,6 @@ static int parse_config(json_object *config)
     if (mapping_type && strcmp(mapping_type, "topic-pair")) {
         MQTT_EXT_ERROR("Unsupported mapping type '%s'", mapping_type);
         return -1;
-    }
-
-    if (subscribe_topics) {
-        g_handler.subscribe_topics = json_object_new_array();
-        if (json_object_is_type(subscribe_topics, json_type_string)) {
-            json_object_array_add(g_handler.subscribe_topics, json_object_get(subscribe_topics));
-        }
-        else if (json_object_is_type(subscribe_topics, json_type_array)) {
-            for (size_t i = 0; i < json_object_array_length(subscribe_topics); i++) {
-                json_object *item = json_object_array_get_idx(subscribe_topics, i);
-                if (!json_object_is_type(item, json_type_string)) {
-                    MQTT_EXT_ERROR("Subscribe topics must be strings (error with '%s')",
-                                   json_object_get_string(item));
-                    return -1;
-                }
-
-                json_object_array_add(g_handler.subscribe_topics, json_object_get(item));
-            }
-        }
     }
 
     if (to_mqtt_json) {
@@ -1143,22 +1130,21 @@ int AfbExtensionServeV1(void *data, struct afb_apiset *call_set)
     int rc = mosquitto_connect(mosq, g_handler.broker_host, g_handler.broker_port,
                                /* keepalive = */ 5);
     if (rc != MOSQ_ERR_SUCCESS) {
-        LIBAFB_ERROR("Error on connect: %s", mosquitto_strerror(rc));
+        LIBAFB_ERROR("Error on connect: host:%s port:%d %s", g_handler.broker_host, g_handler.broker_port, mosquitto_strerror(rc));
         return -1;
     }
 
-    if (g_handler.subscribe_topics) {
-        for (size_t i = 0; i < json_object_array_length(g_handler.subscribe_topics); i++) {
-            json_object *topic = json_object_array_get_idx(g_handler.subscribe_topics, i);
-            const char *topic_name = json_object_get_string(topic);
+    if (g_handler.broker_user && MOSQ_ERR_SUCCESS != mosquitto_username_pw_set(mosq, g_handler.broker_user, g_handler.broker_pwd)) {
+        LIBAFB_ERROR("Error on set user/pwd: %s", mosquitto_strerror(rc));
+        return -1;
+    }
 
-            rc = mosquitto_subscribe(mosq, NULL, topic_name, /* qos = */ 0);
-            if (rc != MOSQ_ERR_SUCCESS) {
-                LIBAFB_ERROR("Cannot connect to %s: %s", topic_name, mosquitto_strerror(rc));
-                return -1;
-            }
-
-            LIBAFB_NOTICE("Subscribed to MQTT topic: %s", topic_name);
+    if (g_handler.subscribe_topic) {
+        rc = mosquitto_subscribe(mosq, NULL, g_handler.subscribe_topic, /* qos = */ 0);
+        if (rc != MOSQ_ERR_SUCCESS) {
+            LIBAFB_ERROR("Cannot connect to %s: %s", g_handler.subscribe_topic,
+                         mosquitto_strerror(rc));
+            return -1;
         }
     }
 

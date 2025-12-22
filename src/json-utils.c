@@ -80,7 +80,7 @@ json_object *json_object_fill_template_with_functions(json_object *jso,
     case json_type_string: {
         const char *str = json_object_get_string(jso);
         size_t len = strlen(str);
-        if ((len >= 3) && (str[0] == '$') && (str[1] == '{') && (str[len - 1] == '}')) {
+        if ((len >= 3) && (str[0] == '%') && (str[1] == '{') && (str[len - 1] == '}')) {
             char tag[len - 3 + 1];
             strncpy(tag, str + 2, len - 3);
             tag[len - 3] = 0;

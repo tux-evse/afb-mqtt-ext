@@ -29,7 +29,6 @@ include(GNUInstallDirs)
 
 pkg_check_modules(deps REQUIRED
     libafb>=5
-    libafb-binder>=5
     libmosquitto
 )
 

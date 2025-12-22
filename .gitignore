@@ -1,1 +1,9 @@
+package
 build/
+Build/
+.*.sw*
+*.tar.gz
+_*
+~*
+.~lock*
+
