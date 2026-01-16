@@ -350,6 +350,7 @@ struct mqtt_ext_handler
 {
     json_object *config_json;
     struct mosquitto *mosq;
+    const char *client_id;
     const char *broker_host;
     const char *broker_user;
     const char *broker_pwd;
@@ -370,6 +371,7 @@ static void mqtt_ext_handler_init(struct mqtt_ext_handler *self)
 {
     memset(self, 0, sizeof(struct mqtt_ext_handler));
 
+    self->client_id= "afb_mqtt_client";
     self->broker_host = DEFAULT_MQTT_BROKER_HOST;
     self->broker_port = DEFAULT_MQTT_BROKER_PORT;
 }
@@ -915,7 +917,8 @@ static int parse_config(json_object *config)
     char *mapping_type = NULL;
     json_object *to_mqtt_json = NULL, *from_mqtt_json = NULL;
 
-    rp_jsonc_unpack(g_handler.config_json, "{s?s s?s s?s s?i s?s s?s s?s s?b s?o s?o}",  //
+    rp_jsonc_unpack(g_handler.config_json, "{s?s s?s s?s s?s s?i s?s s?s s?s s?b s?o s?o}",  //
+                    "client-id",  &g_handler.client_id,
                     "broker-host", &g_handler.broker_host,              //
                     "broker-user", &g_handler.broker_user,              //
                     "broker-pwd", &g_handler.broker_pwd,              //
@@ -1119,7 +1122,7 @@ int AfbExtensionServeV1(void *data, struct afb_apiset *call_set)
     }
 
     struct mosquitto *mosq =
-        mosquitto_new("afb_mqtt_client", /* clean_session = */ true, /* void *obj = */ NULL);
+        mosquitto_new(g_handler.client_id, /* clean_session = */ true, /* void *obj = */ NULL);
     if (mosq == NULL) {
         LIBAFB_ERROR("Error calling afb_mqtt_client\n");
         return -1;
