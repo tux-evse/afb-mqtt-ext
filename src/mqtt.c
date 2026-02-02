@@ -371,7 +371,7 @@ static void mqtt_ext_handler_init(struct mqtt_ext_handler *self)
 {
     memset(self, 0, sizeof(struct mqtt_ext_handler));
 
-    self->client_id= "afb_mqtt_client";
+    self->client_id= NULL; // default dynamic client-id
     self->broker_host = DEFAULT_MQTT_BROKER_HOST;
     self->broker_port = DEFAULT_MQTT_BROKER_PORT;
 }
