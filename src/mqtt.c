@@ -506,6 +506,16 @@ static void on_verb_call_no_reply(struct afb_req_common *req,
 struct afb_req_common_query_itf verb_call_itf = {.reply = on_verb_call_reply,
                                                  .unref = on_my_req_unref};
 
+static void on_mqtt_connect(struct mosquitto *mosq, void *user_data, int r) {
+        int rc = mosquitto_subscribe(mosq, NULL, g_handler.subscribe_topic, /* qos = */ 0);
+        if (rc != MOSQ_ERR_SUCCESS) {
+            LIBAFB_ERROR("MQTT subscribe fail topic:[%s] error:%s", g_handler.subscribe_topic,
+                         mosquitto_strerror(rc));
+        } else {
+            LIBAFB_NOTICE("MQTT subscribe topic:[%s]", g_handler.subscribe_topic);
+        }
+}
+
 /**
  * MQTT subscription callback
  */
@@ -556,8 +566,8 @@ static void on_mqtt_message(struct mosquitto *mosq,
                             data);
         afb_req_common_init(&my_req->req, /* afb_req_common_query_itf = */ &verb_call_itf,
                             g_handler.from_mqtt->api_name, verb_str, 1, &reply, NULL);
+        LIBAFB_DEBUG("Call api:%s verb:%s query:%s", g_handler.from_mqtt->api_name, verb_str, json_object_get_string(data));
         afb_req_common_process(&my_req->req, g_handler.call_set);
-        LIBAFB_DEBUG("Call api/verb %s/%s", g_handler.from_mqtt->api_name, verb_str);
     }
     else if (g_handler.from_mqtt && from_mqtt_is_event(g_handler.from_mqtt, mqtt_json)) {
         json_object *event =
@@ -1142,13 +1152,8 @@ int AfbExtensionServeV1(void *data, struct afb_apiset *call_set)
         return -1;
     }
 
-    if (g_handler.subscribe_topic) {
-        rc = mosquitto_subscribe(mosq, NULL, g_handler.subscribe_topic, /* qos = */ 0);
-        if (rc != MOSQ_ERR_SUCCESS) {
-            LIBAFB_ERROR("Cannot connect to %s: %s", g_handler.subscribe_topic,
-                         mosquitto_strerror(rc));
-            return -1;
-        }
+    if (g_handler.subscribe_topic)  {
+            mosquitto_connect_callback_set(mosq, on_mqtt_connect);
     }
 
     mosquitto_message_callback_set(mosq, on_mqtt_message);
