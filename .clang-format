@@ -1,0 +1,15 @@
+---
+BasedOnStyle: Chromium
+IndentWidth: 4
+---
+Language: Cpp
+AlignConsecutiveMacros: true
+BraceWrapping:
+  AfterClass: true
+  AfterFunction: true
+  AfterStruct: true
+  BeforeElse: true
+BreakBeforeBraces: Custom
+ColumnLimit: 100
+IndentCaseLabels: false
+PointerAlignment: Right

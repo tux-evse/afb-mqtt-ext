@@ -371,7 +371,7 @@ static void mqtt_ext_handler_init(struct mqtt_ext_handler *self)
 {
     memset(self, 0, sizeof(struct mqtt_ext_handler));
 
-    self->client_id= NULL; // default dynamic client-id
+    self->client_id = NULL;  // default dynamic client-id
     self->broker_host = DEFAULT_MQTT_BROKER_HOST;
     self->broker_port = DEFAULT_MQTT_BROKER_PORT;
 }
@@ -474,17 +474,17 @@ static void on_verb_call_reply(struct afb_req_common *req,
     const char *filled_str =
         json_object_to_json_string_length(filled, JSON_C_TO_STRING_PLAIN, &filled_len);
 
-    if (! g_handler.publish_extend) {
+    if (!g_handler.publish_extend) {
         mosquitto_publish(g_handler.mosq, /* mid = */ NULL, g_handler.publish_topic, filled_len,
-        filled_str,
-        /* qos = */ 0, /* retain = */ false);
-    } else {
+                          filled_str,
+                          /* qos = */ 0, /* retain = */ false);
+    }
+    else {
         // extended mode add verb name to mqtt topic
         char topic[64];
-        snprintf(topic,sizeof(topic),"%s/%s", g_handler.publish_topic, req->verbname);
+        snprintf(topic, sizeof(topic), "%s/%s", g_handler.publish_topic, req->verbname);
         mosquitto_publish(g_handler.mosq, NULL, topic, filled_len, filled_str, 0, false);
     }
-
 
     json_object_put(filled);
 }
@@ -506,14 +506,16 @@ static void on_verb_call_no_reply(struct afb_req_common *req,
 struct afb_req_common_query_itf verb_call_itf = {.reply = on_verb_call_reply,
                                                  .unref = on_my_req_unref};
 
-static void on_mqtt_connect(struct mosquitto *mosq, void *user_data, int r) {
-        int rc = mosquitto_subscribe(mosq, NULL, g_handler.subscribe_topic, /* qos = */ 0);
-        if (rc != MOSQ_ERR_SUCCESS) {
-            LIBAFB_ERROR("MQTT subscribe fail topic:[%s] error:%s", g_handler.subscribe_topic,
-                         mosquitto_strerror(rc));
-        } else {
-            LIBAFB_NOTICE("MQTT subscribe topic:[%s]", g_handler.subscribe_topic);
-        }
+static void on_mqtt_connect(struct mosquitto *mosq, void *user_data, int r)
+{
+    int rc = mosquitto_subscribe(mosq, NULL, g_handler.subscribe_topic, /* qos = */ 0);
+    if (rc != MOSQ_ERR_SUCCESS) {
+        LIBAFB_ERROR("MQTT subscribe fail topic:[%s] error:%s", g_handler.subscribe_topic,
+                     mosquitto_strerror(rc));
+    }
+    else {
+        LIBAFB_NOTICE("MQTT subscribe topic:[%s]", g_handler.subscribe_topic);
+    }
 }
 
 /**
@@ -566,7 +568,8 @@ static void on_mqtt_message(struct mosquitto *mosq,
                             data);
         afb_req_common_init(&my_req->req, /* afb_req_common_query_itf = */ &verb_call_itf,
                             g_handler.from_mqtt->api_name, verb_str, 1, &reply, NULL);
-        LIBAFB_DEBUG("Call api:%s verb:%s query:%s", g_handler.from_mqtt->api_name, verb_str, json_object_get_string(data));
+        LIBAFB_DEBUG("Call api:%s verb:%s query:%s", g_handler.from_mqtt->api_name, verb_str,
+                     json_object_get_string(data));
         afb_req_common_process(&my_req->req, g_handler.call_set);
     }
     else if (g_handler.from_mqtt && from_mqtt_is_event(g_handler.from_mqtt, mqtt_json)) {
@@ -737,9 +740,8 @@ static struct afb_api_itf to_mqtt_api_itf = {.process = on_to_mqtt_request};
  */
 static void on_from_mqtt_api_call(void *closure, struct afb_req_common *req)
 {
-
     // Fulup ???
-    if (! g_handler.from_mqtt) {
+    if (!g_handler.from_mqtt) {
         afb_req_common_reply(req, AFB_ERRNO_UNKNOWN_VERB, 0, NULL);
         return;
     }
@@ -834,14 +836,15 @@ static void on_event_pushed(void *closure, const struct afb_evt_pushed *event)
     const char *filled_str =
         json_object_to_json_string_length(filled, JSON_C_TO_STRING_PLAIN, &filled_len);
 
-    if (! g_handler.publish_extend) {
+    if (!g_handler.publish_extend) {
         mosquitto_publish(g_handler.mosq, /* mid = */ NULL, g_handler.publish_topic, filled_len,
-        filled_str,
-        /* qos = */ 0, /* retain = */ false);
-    } else {
+                          filled_str,
+                          /* qos = */ 0, /* retain = */ false);
+    }
+    else {
         // extended mode add verb name to mqtt topic
         char topic[64];
-        snprintf(topic,sizeof(topic),"%s/%s", g_handler.publish_topic,afb_evt_name(event->evt));
+        snprintf(topic, sizeof(topic), "%s/%s", g_handler.publish_topic, afb_evt_name(event->evt));
         mosquitto_publish(g_handler.mosq, NULL, topic, filled_len, filled_str, 0, false);
     }
 
@@ -912,7 +915,6 @@ static void init_event_registrations()
 
 static int parse_config(json_object *config)
 {
-
     mqtt_ext_handler_init(&g_handler);
 
     // extract extention config from afb-binder to get env expansion
@@ -928,17 +930,17 @@ static int parse_config(json_object *config)
     json_object *to_mqtt_json = NULL, *from_mqtt_json = NULL;
 
     rp_jsonc_unpack(g_handler.config_json, "{s?s s?s s?s s?s s?i s?s s?s s?s s?b s?o s?o}",  //
-                    "client-id",  &g_handler.client_id,
-                    "broker-host", &g_handler.broker_host,              //
-                    "broker-user", &g_handler.broker_user,              //
-                    "broker-pwd", &g_handler.broker_pwd,              //
-                    "broker-port", &g_handler.broker_port,              //
-                    "mapping-type", &mapping_type,                      //
-                    "subscribe-topic", &g_handler.subscribe_topic,      //
-                    "publish-topic", &g_handler.publish_topic,          //
-                    "publish-extend", &g_handler.publish_extend,        //
-                    "to-mqtt", &to_mqtt_json,                           //
-                    "from-mqtt", &from_mqtt_json                        //
+                    "client-id", &g_handler.client_id,                                       //
+                    "broker-host", &g_handler.broker_host,                                   //
+                    "broker-user", &g_handler.broker_user,                                   //
+                    "broker-pwd", &g_handler.broker_pwd,                                     //
+                    "broker-port", &g_handler.broker_port,                                   //
+                    "mapping-type", &mapping_type,                                           //
+                    "subscribe-topic", &g_handler.subscribe_topic,                           //
+                    "publish-topic", &g_handler.publish_topic,                               //
+                    "publish-extend", &g_handler.publish_extend,                             //
+                    "to-mqtt", &to_mqtt_json,                                                //
+                    "from-mqtt", &from_mqtt_json                                             //
     );
 
     if (mapping_type && strcmp(mapping_type, "topic-pair")) {
@@ -1143,17 +1145,20 @@ int AfbExtensionServeV1(void *data, struct afb_apiset *call_set)
     int rc = mosquitto_connect(mosq, g_handler.broker_host, g_handler.broker_port,
                                /* keepalive = */ 5);
     if (rc != MOSQ_ERR_SUCCESS) {
-        LIBAFB_ERROR("Error on connect: host:%s port:%d %s", g_handler.broker_host, g_handler.broker_port, mosquitto_strerror(rc));
+        LIBAFB_ERROR("Error on connect: host:%s port:%d %s", g_handler.broker_host,
+                     g_handler.broker_port, mosquitto_strerror(rc));
         return -1;
     }
 
-    if (g_handler.broker_user && MOSQ_ERR_SUCCESS != mosquitto_username_pw_set(mosq, g_handler.broker_user, g_handler.broker_pwd)) {
+    if (g_handler.broker_user &&
+        MOSQ_ERR_SUCCESS !=
+            mosquitto_username_pw_set(mosq, g_handler.broker_user, g_handler.broker_pwd)) {
         LIBAFB_ERROR("Error on set user/pwd: %s", mosquitto_strerror(rc));
         return -1;
     }
 
-    if (g_handler.subscribe_topic)  {
-            mosquitto_connect_callback_set(mosq, on_mqtt_connect);
+    if (g_handler.subscribe_topic) {
+        mosquitto_connect_callback_set(mosq, on_mqtt_connect);
     }
 
     mosquitto_message_callback_set(mosq, on_mqtt_message);
