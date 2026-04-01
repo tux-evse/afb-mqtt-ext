@@ -77,8 +77,8 @@ This item contains the following keys.
 The value of this key is used as a template to craft JSON messages for requests. See [JSON templating](#json_templating) for details.
 
 The template will be filled with the following context:
-- `${verb}` : name of the verb the `to_mqtt` API has been called with
-- `${data}` : first argument of the verb called, as JSON
+- `%{verb}` : name of the verb the `to_mqtt` API has been called with
+- `%{data}` : first argument of the verb called, as JSON
 
 #### response-extraction
 
@@ -112,8 +112,8 @@ The sub-parts of the configuration are:
   - **verb**: the name of the verb to call
   - **args**: JSON sub tree to send as first argument to the verb
 - **template**: [JSON template](#json_template) of the MQTT message to send when an event is received. The context of the template fill is the following:
-  - `${event_name}` : name of the received event
-  - `${data}`: JSON data associated with the event
+  - `%{event_name}` : name of the received event
+  - `%{data}`: JSON data associated with the event
 
 ### Examples
 
@@ -130,10 +130,10 @@ subscribe-topic: in_topic
 to-mqtt:
   timeout-ms: 500
   request-template:
-    id: ${uuid()}
-    name: ${verb}
+    id: "%{uuid()}"
+    name: "%{verb}"
     type: request
-    data: ${data}
+    data: "%{data}"
   request-correlation-path: .id
   response-extraction:
     filter:
@@ -162,9 +162,9 @@ to-mqtt:
         args:
           action: subscribe
     template:
-      name: ${event_name}
+      name: "%{event_name}"
       type: update
-      data: ${data}
+      data: "%{data}"
 ```
 
 With this example, the extension will call the verb `subscribe` of the api `test` with arguments `{"action": "subscribe"}` on startup.
@@ -241,10 +241,10 @@ from-mqtt:
       value: request
 
   response-template:
-    id: ${request.id}
-    name: ${verb}
+    id: "%{request.id}"
+    name: "%{verb}"
     type: response
-    data: ${data}
+    data: "%{data}"
 ```
 
 #### Events
@@ -270,7 +270,7 @@ from-mqtt:
 
 A JSON template is a JSON object where strings may have a special syntax and are then substituted by the value of some other variables.
 
-If a string starts with `${` and ends with `}`, the identifier inside is used as a variable name. Depending on which part of the configuration the JSON template is used, the available variables for substitution differ. Refer to the documentation of each configuration section for the list of available variables and their values.
+If a string starts with `%{` and ends with `}`, the identifier inside is used as a variable name. Depending on which part of the configuration the JSON template is used, the available variables for substitution differ. Refer to the documentation of each configuration section for the list of available variables and their values.
 
 If the variable name ends with `()`, it is interpreted as a function call rather than a fixed value.
 

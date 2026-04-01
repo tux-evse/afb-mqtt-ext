@@ -12,9 +12,9 @@ from-mqtt:
       value: request
 
   response-template:
-    id: ${request.id}
-    name: ${verb}
+    id: "%{request.id}"
+    name: "%{verb}"
     type: response
-    data: ${data}
+    data: "%{data}"
 
 

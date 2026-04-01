@@ -8,8 +8,8 @@ to-mqtt:
         args:
           action: subscribe
     template:
-      id: ${uuid()}
-      name: ${event_name}
+      id: "%{uuid()}"
+      name: "%{event_name}"
       type: update
-      data: ${data}
+      data: "%{data}"
 

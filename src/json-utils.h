@@ -38,13 +38,13 @@ json_object *json_object_get_path(json_object *obj, const char *path);
  * Treat a JSON object as a template where special strings may be
  * replaced with some provided values
  *
- * Any string value in the JSON object that starts with "${" and ends
+ * Any string value in the JSON object that starts with "%{" and ends
  * with "}" are treated as a placeholder whose value is replaced.
  *
  * The "mapping" argument is an object that maps strings to any JSON
  * value (including a sub JSON tree).
  *
- * e.g. For an input JSON object like {"data" : "${my_data}"} and a
+ * e.g. For an input JSON object like {"data" : "%{my_data}"} and a
  * "mapping" object like {"my_data": {"ok": 42}}, the returned JSON
  * object will be {"data": {"ok": 42}}
  *
@@ -53,7 +53,7 @@ json_object *json_object_get_path(json_object *obj, const char *path);
  * "path" inside the associated value.
  *
  * e.g. considering the mapping of
- * the last example, a template like '{"data": "${my_data.ok}"}' will
+ * the last example, a template like '{"data": "%{my_data.ok}"}' will
  * give '{"data": 42}'
  *
  * @param obj       the input JSON object to parse as a template
@@ -77,7 +77,7 @@ struct template_function
  * This function behaves like json_object_fill_template, but is also
  * able to interpret function calls.
  *
- * A function call is a special string of the form "${function_name()}".
+ * A function call is a special string of the form "%{function_name()}".
  * If the supplied array of template functions has an entry with the
  * function name `function_name`, the json string is replaced by the
  * result of the invocation of the generator function.

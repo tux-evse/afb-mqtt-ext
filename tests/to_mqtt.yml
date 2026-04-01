@@ -6,10 +6,10 @@ subscribe-topic: in_topic
 to-mqtt:
   timeout-ms: 1000
   request-template:
-    id: ${uuid()}
-    name: ${verb}
+    id: "%{uuid()}"
+    name: "%{verb}"
     type: request
-    data: ${data}
+    data: "%{data}"
   response-extraction:
     filter:
       path: .type

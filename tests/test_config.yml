@@ -6,10 +6,10 @@ subscribe-topic: in_topic
 to-mqtt:
   timeout-ms: 500
   request-template:
-    id: ${uuid()}
-    name: ${verb}
+    id: "%{uuid()}"
+    name: "%{verb}"
     type: request
-    data: ${data}
+    data: "%{data}"
   request-correlation-path: .id
   response-extraction:
     filter:
@@ -27,10 +27,10 @@ to-mqtt:
           action: subscribe
         event: py-event
     template:
-      id: ${uuid()}
-      name: ${event_name}
+      id: "%{uuid()}"
+      name: "%{event_name}"
       type: update
-      data: ${data}
+      data: "%{data}"
 
 from-mqtt:
   # the AFB API to call on requests
@@ -43,10 +43,10 @@ from-mqtt:
       value: request
 
   response-template:
-    id: ${request.id}
-    name: ${verb}
+    id: "%{request.id}"
+    name: "%{verb}"
     type: response
-    data: ${data}
+    data: "%{data}"
 
   # this will emit an event
   event-extraction:
