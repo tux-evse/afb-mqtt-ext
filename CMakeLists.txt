@@ -16,24 +16,17 @@
 # limitations under the License.
 ###########################################################################
 
-CMAKE_MINIMUM_REQUIRED(VERSION 3.6)
-project(afb-mqtt)
+CMAKE_MINIMUM_REQUIRED(VERSION 3.14)
 
-set(CMAKE_INSTALL_SO_NO_EXE 0)
-
-# Project Info
-# ------------------
-set(PROJECT_PRETTY_NAME "MQTT Extension for AFB-binder")
-set(PROJECT_DESCRIPTION "Provide MQTT connectivity")
-set(PROJECT_URL "https://github.com/redpesk-common/afb-mqtt-ext")
-set(PROJECT_ICON "icon.jpg")
-set(PROJECT_AUTHOR "Iot-Team")
-set(PROJECT_AUTHOR_MAIL "secretariat@iot.bzh")
-set(PROJECT_LICENSE "Apache-2")
-set(PROJECT_LANGUAGES,"C")
-set(PROJECT_VERSION 1.0)
+project(afb-mqtt-ext
+	VERSION 1.0.0
+	DESCRIPTION "Provide MQTT connectivity"
+	HOMEPAGE_URL "https://github.com/tux-evse/afb-mqtt-ext"
+	LANGUAGES C)
 
 include(FindPkgConfig)
+include(GNUInstallDirs)
+
 pkg_check_modules(deps REQUIRED
     libafb>=5
     libafb-binder>=5
@@ -45,7 +38,7 @@ set(SRC ./src/mqtt.c ./src/json-utils.c)
 
 add_library(afb-mqtt-ext SHARED ${SRC})
 
-target_compile_options(afb-mqtt-ext PUBLIC -Wall)
+target_compile_options(afb-mqtt-ext PRIVATE -Wall ${deps_CFLAGS})
 
 target_link_libraries(afb-mqtt-ext ${deps_LDFLAGS})
 
