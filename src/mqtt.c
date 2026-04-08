@@ -355,7 +355,8 @@ struct mqtt_ext_handler
     const char *broker_user;
     const char *broker_pwd;
     int broker_port;
-    const char *subscribe_topic;
+    // subscribe topics as array of strings
+    json_object *subscribe_topics;
     const char *publish_topic;
     const uint publish_extend;
     struct to_mqtt *to_mqtt;
@@ -385,6 +386,10 @@ static void mqtt_ext_handler_destroy(struct mqtt_ext_handler *self)
         to_mqtt_delete(self->to_mqtt);
     if (self->from_mqtt)
         from_mqtt_delete(self->from_mqtt);
+
+    if (self->subscribe_topics) {
+        json_object_put(self->subscribe_topics);
+    }
 
     json_object_put(self->config_json);
 
@@ -508,13 +513,17 @@ struct afb_req_common_query_itf verb_call_itf = {.reply = on_verb_call_reply,
 
 static void on_mqtt_connect(struct mosquitto *mosq, void *user_data, int r)
 {
-    int rc = mosquitto_subscribe(mosq, NULL, g_handler.subscribe_topic, /* qos = */ 0);
-    if (rc != MOSQ_ERR_SUCCESS) {
-        LIBAFB_ERROR("MQTT subscribe fail topic:[%s] error:%s", g_handler.subscribe_topic,
-                     mosquitto_strerror(rc));
-    }
-    else {
-        LIBAFB_NOTICE("MQTT subscribe topic:[%s]", g_handler.subscribe_topic);
+    for (size_t i = 0; i < json_object_array_length(g_handler.subscribe_topics); i++) {
+        json_object *topic = json_object_array_get_idx(g_handler.subscribe_topics, i);
+        const char *topic_name = json_object_get_string(topic);
+        int rc = mosquitto_subscribe(mosq, NULL, topic_name, /* qos = */ 0);
+        if (rc != MOSQ_ERR_SUCCESS) {
+            LIBAFB_ERROR("MQTT subscribe failed, topic:[%s] error:%s", topic_name,
+                         mosquitto_strerror(rc));
+        }
+        else {
+            LIBAFB_NOTICE("MQTT subscribed to topic:[%s]", topic_name);
+        }
     }
 }
 
@@ -928,15 +937,16 @@ static int parse_config(json_object *config)
 
     char *mapping_type = NULL;
     json_object *to_mqtt_json = NULL, *from_mqtt_json = NULL;
+    json_object *subscribe_topics = NULL;
 
-    rp_jsonc_unpack(g_handler.config_json, "{s?s s?s s?s s?s s?i s?s s?s s?s s?b s?o s?o}",  //
+    rp_jsonc_unpack(g_handler.config_json, "{s?s s?s s?s s?s s?i s?s s?o s?s s?b s?o s?o}",  //
                     "client-id", &g_handler.client_id,                                       //
                     "broker-host", &g_handler.broker_host,                                   //
                     "broker-user", &g_handler.broker_user,                                   //
                     "broker-pwd", &g_handler.broker_pwd,                                     //
                     "broker-port", &g_handler.broker_port,                                   //
                     "mapping-type", &mapping_type,                                           //
-                    "subscribe-topic", &g_handler.subscribe_topic,                           //
+                    "subscribe-topic", &subscribe_topics,                                    //
                     "publish-topic", &g_handler.publish_topic,                               //
                     "publish-extend", &g_handler.publish_extend,                             //
                     "to-mqtt", &to_mqtt_json,                                                //
@@ -946,6 +956,25 @@ static int parse_config(json_object *config)
     if (mapping_type && strcmp(mapping_type, "topic-pair")) {
         MQTT_EXT_ERROR("Unsupported mapping type '%s'", mapping_type);
         return -1;
+    }
+
+    if (subscribe_topics) {
+        g_handler.subscribe_topics = json_object_new_array();
+        if (json_object_is_type(subscribe_topics, json_type_string)) {
+            json_object_array_add(g_handler.subscribe_topics, json_object_get(subscribe_topics));
+        }
+        else if (json_object_is_type(subscribe_topics, json_type_array)) {
+            for (size_t i = 0; i < json_object_array_length(subscribe_topics); i++) {
+                json_object *item = json_object_array_get_idx(subscribe_topics, i);
+                if (!json_object_is_type(item, json_type_string)) {
+                    MQTT_EXT_ERROR("Subscribe topics must be strings (error with '%s')",
+                                   json_object_get_string(item));
+                    return -1;
+                }
+
+                json_object_array_add(g_handler.subscribe_topics, json_object_get(item));
+            }
+        }
     }
 
     if (to_mqtt_json) {
@@ -1157,7 +1186,7 @@ int AfbExtensionServeV1(void *data, struct afb_apiset *call_set)
         return -1;
     }
 
-    if (g_handler.subscribe_topic) {
+    if (g_handler.subscribe_topics) {
         mosquitto_connect_callback_set(mosq, on_mqtt_connect);
     }
 

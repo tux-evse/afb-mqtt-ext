@@ -14,6 +14,7 @@ import paho.mqtt.client as mqtt
 
 OUT_TOPIC = "out_topic"
 IN_TOPIC = "in_topic"
+IN_TOPIC2 = "in_topic2"
 
 # MQTT client
 mqttc = None
@@ -56,7 +57,7 @@ def on_mqtt_connect(client, userdata, flags, reason_code, properties):
     mqtt_state = "ready"
 
 
-def mqtt_publish(data: dict):
+def mqtt_publish(data: dict, topic=IN_TOPIC):
     return mqttc.publish(IN_TOPIC, json.dumps(data).encode("utf-8"))
 
 
@@ -256,7 +257,7 @@ class Tests:
             assert raised
 
         r = libafb.callsync(
-            self.binder, "from_mqtt", "subscribe_events", ["event1", "event2"]
+            self.binder, "from_mqtt", "subscribe_events", ["event1", "event2", "eventA"]
         )
         assert r.status == 0
 
@@ -271,7 +272,11 @@ class Tests:
 
             return test_event_cb_
 
-        for event_name in ("event1", "event2"):
+        for topic_name, event_name in (
+            (IN_TOPIC, "event1"),
+            (IN_TOPIC, "event2"),
+            (IN_TOPIC2, "eventA"),
+        ):
             libafb.evthandler(
                 self.binder,
                 {
@@ -289,6 +294,7 @@ class Tests:
                     "name": event_name,
                     "data": "toto",
                 },
+                topic=topic_name,
             )
 
             for _ in range(5):

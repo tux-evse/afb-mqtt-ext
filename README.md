@@ -70,7 +70,7 @@ Name of the MQTT topic on which messages are sent.
 
 #### subscribe-topic
 
-Name of the MQTT topic on which messages are received
+Name of the MQTT topics on which messages are received. It can be a string to subscribe to a unique topic or an array of topic names to subscribe to.
 
 *Default value*: same as the publish topic
 

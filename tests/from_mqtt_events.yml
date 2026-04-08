@@ -1,4 +1,6 @@
-subscribe-topic: in_topic
+subscribe-topic:
+  - in_topic
+  - in_topic2
 
 from-mqtt:
   # the AFB API to call on requests
