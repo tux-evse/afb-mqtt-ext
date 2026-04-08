@@ -5,6 +5,7 @@ import signal
 import sys
 import threading
 import queue
+import yaml
 
 import libafb
 
@@ -102,6 +103,8 @@ def main():
         sys.exit(-1)
 
     config_file_path = sys.argv[1]
+    with open(config_file_path, "r") as fi:
+        config = yaml.safe_load(fi)
 
     tests = sys.argv[2:]
 
@@ -115,7 +118,7 @@ def main():
                 {
                     "path": "libafb-mqtt-ext.so",
                     "uid": "mqtt",
-                    "config": {"mqtt-config-file": config_file_path},
+                    "config": {"config": config},
                 }
             ],
         }
@@ -203,6 +206,7 @@ class Tests:
             assert r.args[0] == data_to_test
 
         # Test unexisting verb => timeout
+        print("*** Expected 'internal-error' ***")
         raised = False
         try:
             r = libafb.callsync(self.binder, "to_mqtt", "blurp", {})
@@ -233,6 +237,7 @@ class Tests:
     def test_from_mqtt_events(self):
         # Test the "event" mode
         raised = False
+        print("*** Expected 'invalid-request' ***")
         try:
             libafb.callsync(self.binder, "from_mqtt", "subscribe_events")
         except RuntimeError as e:
@@ -242,6 +247,7 @@ class Tests:
 
         for wrong_arg in (None, 42, "string", {"ok": 42}):
             raised = False
+            print("*** Expected 'invalid-request' ***")
             try:
                 libafb.callsync(self.binder, "from_mqtt", "subscribe_events", wrong_arg)
             except RuntimeError as e:
@@ -294,6 +300,7 @@ class Tests:
     def test_from_mqtt_events_bcast(self):
         # Test the "event" mode in broadcast
         raised = False
+        print("*** Expected 'unknown-verb' ***")
         try:
             libafb.callsync(self.binder, "from_mqtt", "subscribe_events")
         except RuntimeError as e:
