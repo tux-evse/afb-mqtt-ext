@@ -19,7 +19,7 @@
 CMAKE_MINIMUM_REQUIRED(VERSION 3.14)
 
 project(afb-mqtt-ext
-	VERSION 1.0.0
+	VERSION 2.0.0
 	DESCRIPTION "Provide MQTT connectivity"
 	HOMEPAGE_URL "https://github.com/tux-evse/afb-mqtt-ext"
 	LANGUAGES C)
