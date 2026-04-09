@@ -74,6 +74,10 @@ Name of the MQTT topics on which messages are received. It can be a string to su
 
 *Default value*: same as the publish topic
 
+#### publish-extend
+
+When set to true, the "extended" publication mode is used: the topic name on which messages are sent to is composed of the topic name and the verb name ('topic/verb')
+
 ## Communication initiated by AFB to MQTT
 
 The extension exposes an API named `to_mqtt`.
